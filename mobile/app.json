@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Qwink",
+    "slug": "qwink",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "qwink",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#128C7E"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.rahulkamti.qwink"
+    },
+    "android": {
+      "package": "com.rahulkamti.qwink"
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router"
+    ]
+  }
+}
