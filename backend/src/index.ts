@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
 import authRoutes from './modules/auth/routes.js';
 import userRoutes from './modules/user/routes.js';
+import messageRoutes from './modules/messages/routes.js';
 import { handleWebSocketUpgrade } from './ws/handler.js';
 
-const app = new Hono<{ Bindings: { DB: D1Database; MEDIA_BUCKET: R2Bucket; JWT_SECRET?: string } }>();
+const app = new Hono<{ Bindings: { DB: D1Database; MEDIA_BUCKET?: R2Bucket; JWT_SECRET?: string } }>();
 
 app.get('/', (c) => {
   return c.json({
@@ -17,6 +18,7 @@ app.get('/', (c) => {
 // Mount REST routes
 app.route('/api/auth', authRoutes);
 app.route('/api/user', userRoutes);
+app.route('/api/messages', messageRoutes);
 
 // WebSocket Upgrade route
 app.get('/ws', async (c) => {
