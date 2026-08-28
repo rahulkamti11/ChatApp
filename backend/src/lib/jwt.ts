@@ -15,7 +15,7 @@ export async function signJWT(payload: Record<string, any>, secret: string): Pro
   const signature = await crypto.subtle.sign(
     'HMAC',
     key,
-    new TextEncoder().encode(${encodedHeader}.)
+    new TextEncoder().encode(encodedHeader + '.' + encodedPayload)
   );
   
   const encodedSignature = btoa(String.fromCharCode(...new Uint8Array(signature)))
@@ -23,7 +23,7 @@ export async function signJWT(payload: Record<string, any>, secret: string): Pro
     .replace(/\+/g, '-')
     .replace(/\//g, '_');
     
-  return ${encodedHeader}..;
+  return encodedHeader + '.' + encodedPayload + '.' + encodedSignature;
 }
 
 export async function verifyJWT(token: string, secret: string): Promise<Record<string, any> | null> {
@@ -45,7 +45,7 @@ export async function verifyJWT(token: string, secret: string): Promise<Record<s
       'HMAC',
       key,
       signatureBytes,
-      new TextEncoder().encode(${header}.)
+      new TextEncoder().encode(header + '.' + payload)
     );
     
     if (!valid) return null;

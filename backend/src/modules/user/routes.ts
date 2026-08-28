@@ -33,14 +33,7 @@ user.patch('/profile', async (c) => {
   const { displayName, statusBio, avatarUrl, showVirtualNumber, cloudSyncEnabled } = body;
   
   await c.env.DB.prepare(
-    UPDATE users SET
-      display_name = COALESCE(?, display_name),
-      status_bio = COALESCE(?, status_bio),
-      avatar_url = COALESCE(?, avatar_url),
-      show_virtual_number = COALESCE(?, show_virtual_number),
-      cloud_sync_enabled = COALESCE(?, cloud_sync_enabled),
-      updated_at = datetime('now')
-    WHERE id = ?
+    'UPDATE users SET display_name = COALESCE(?, display_name), status_bio = COALESCE(?, status_bio), avatar_url = COALESCE(?, avatar_url), show_virtual_number = COALESCE(?, show_virtual_number), cloud_sync_enabled = COALESCE(?, cloud_sync_enabled), updated_at = datetime("now") WHERE id = ?'
   ).bind(
     displayName ?? null,
     statusBio ?? null,
@@ -71,7 +64,7 @@ user.patch('/username', async (c) => {
     return c.json({ error: 'Username is already taken' }, 400);
   }
   
-  await c.env.DB.prepare('UPDATE users SET username = ?, updated_at = datetime(\now\) WHERE id = ?').bind(cleanUsername, authUser.userId).run();
+  await c.env.DB.prepare('UPDATE users SET username = ?, updated_at = datetime("now") WHERE id = ?').bind(cleanUsername, authUser.userId).run();
   
   return c.json({ message: 'Username updated successfully', username: cleanUsername });
 });
@@ -83,12 +76,10 @@ user.get('/search', async (c) => {
   }
   
   const cleanQuery = query.replace('@', '').trim();
+  const pattern = '%' + cleanQuery + '%';
   const results = await c.env.DB.prepare(
-    SELECT id, display_name, username, virtual_number, avatar_url, show_virtual_number, status_bio
-    FROM users
-    WHERE (username LIKE ? OR virtual_number LIKE ? OR display_name LIKE ?)
-    LIMIT 20
-  ).bind(%%, %%, %%).all();
+    'SELECT id, display_name, username, virtual_number, avatar_url, show_virtual_number, status_bio FROM users WHERE (username LIKE ? OR virtual_number LIKE ? OR display_name LIKE ?) LIMIT 20'
+  ).bind(pattern, pattern, pattern).all();
   
   const users = (results.results || []).map((u: any) => ({
     id: u.id,
