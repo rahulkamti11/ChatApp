@@ -1,0 +1,20 @@
+{
+  "name": "chatapp-backend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "d1:migrate": "wrangler d1 execute chatapp-d1 --file=./db/schema.sql",
+    "d1:seed": "wrangler d1 execute chatapp-d1 --file=./db/seed.sql"
+  },
+  "dependencies": {
+    "hono": "^4.0.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240215.0",
+    "typescript": "^5.3.3",
+    "wrangler": "^3.30.0"
+  }
+}

@@ -1,0 +1,12 @@
+node_modules/
+.env
+.wrangler/
+dist/
+.expo/
+*.log
+.DS_Store
+
+# Exclude local artifacts & UI mockups from Git
+IMPLEMENTATION_PLAN.md
+AgentSkills.md
+UI/
