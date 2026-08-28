@@ -15,35 +15,39 @@ class SocketService {
     }
 
     this.isConnecting = true;
-    this.ws = new WebSocket(`${WS_URL}?token=${token}`);
+    try {
+      this.ws = new WebSocket(`${WS_URL}?token=${token}`);
 
-    this.ws.onopen = () => {
-      console.log('[WebSocket] Connected');
+      this.ws.onopen = () => {
+        console.log('[WebSocket] Connected');
+        this.isConnecting = false;
+        this.emit('connection_change', { status: 'connected' });
+      };
+
+      this.ws.onmessage = async (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          await this.handleIncomingEvent(data);
+        } catch (err) {
+          // Silent parse catch
+        }
+      };
+
+      this.ws.onclose = () => {
+        this.isConnecting = false;
+        this.emit('connection_change', { status: 'disconnected' });
+        setTimeout(() => {
+          if (this.token) this.connect(this.token);
+        }, 3000);
+      };
+
+      this.ws.onerror = (error) => {
+        // Silent catch for OS socket aborts / network switches to prevent yellow toast popups
+        this.isConnecting = false;
+      };
+    } catch (e) {
       this.isConnecting = false;
-      this.emit('connection_change', { status: 'connected' });
-    };
-
-    this.ws.onmessage = async (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        await this.handleIncomingEvent(data);
-      } catch (err) {
-        console.error('[WebSocket] Error parsing message:', err);
-      }
-    };
-
-    this.ws.onclose = () => {
-      console.log('[WebSocket] Disconnected');
-      this.isConnecting = false;
-      this.emit('connection_change', { status: 'disconnected' });
-      setTimeout(() => {
-        if (this.token) this.connect(this.token);
-      }, 3000);
-    };
-
-    this.ws.onerror = (error) => {
-      console.error('[WebSocket] Error:', error);
-    };
+    }
   }
 
   private async handleIncomingEvent(data: any) {
@@ -82,10 +86,16 @@ class SocketService {
     }
   }
 
-  public send(payload: any) {
+  public isConnected(): boolean {
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  public send(payload: any): boolean {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(payload));
+      return true;
     }
+    return false;
   }
 
   public on(event: string, callback: (data: any) => void) {
