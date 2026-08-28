@@ -6,13 +6,7 @@
     {
       "binding": "DB",
       "database_name": "chatapp-d1",
-      "database_id": "local-d1-id"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "MEDIA_BUCKET",
-      "bucket_name": "chatapp-r2"
+      "database_id": "d814a04f-bce6-45b2-a456-4c7a0a672032"
     }
   ]
 }
