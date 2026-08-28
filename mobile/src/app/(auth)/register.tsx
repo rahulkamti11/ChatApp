@@ -132,6 +132,15 @@ export default function RegisterScreen() {
             <Text style={styles.buttonText}>Register Account</Text>
           )}
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.footerLink}
+          onPress={() => router.push('/(auth)/login')}
+        >
+          <Text style={styles.footerText}>
+            Already have an account? <Text style={styles.footerHighlight}>Log In</Text>
+          </Text>
+        </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
   );
@@ -183,7 +192,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 28,
     alignItems: 'center',
-    marginTop: 32,
+    marginTop: 24,
   },
   buttonDisabled: {
     opacity: 0.6,
@@ -191,6 +200,18 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#FFFFFF',
     fontSize: 16,
+    fontWeight: 'bold',
+  },
+  footerLink: {
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  footerText: {
+    fontSize: 14,
+    color: Colors.light.textSecondary,
+  },
+  footerHighlight: {
+    color: Colors.light.primary,
     fontWeight: 'bold',
   },
 });
