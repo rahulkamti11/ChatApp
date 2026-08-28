@@ -11,10 +11,15 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { Send, Check, CheckCheck } from 'lucide-react-native';
-import { getMessagesForConversation, insertLocalMessage } from '../../db/queries/messages';
+import { getMessagesForConversation, insertLocalMessage, updateMessageStatus } from '../../db/queries/messages';
 import { socketService } from '../../services/socket';
+import { apiRequest } from '../../services/api';
 import { useAuthStore } from '../../store/auth';
 import { Colors } from '../../theme/colors';
+
+function generateMessageId(): string {
+  return 'msg_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 10);
+}
 
 export default function ChatRoomScreen() {
   const { id: conversationId, otherUserId, otherDisplayName } = useLocalSearchParams<{
@@ -25,6 +30,7 @@ export default function ChatRoomScreen() {
 
   const navigation = useNavigation();
   const currentUser = useAuthStore((state) => state.user);
+  const token = useAuthStore((state) => state.token);
 
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState('');
@@ -36,6 +42,14 @@ export default function ChatRoomScreen() {
     });
 
     loadMessages();
+
+    // 1. Ensure WebSocket connection is active
+    if (token && !socketService.isConnected()) {
+      socketService.connect(token);
+    }
+
+    // 2. Poll for pending/missed messages from server
+    syncMissedMessages();
 
     const unsubscribeMsg = socketService.on('message_received', (data: any) => {
       if (data.conversationId === conversationId) {
@@ -55,6 +69,34 @@ export default function ChatRoomScreen() {
     };
   }, [conversationId]);
 
+  const syncMissedMessages = async () => {
+    if (!token || !conversationId) return;
+    try {
+      const data = await apiRequest('/api/messages/sync', {
+        method: 'POST',
+        body: JSON.stringify({ conversationId, lastSequence: 0 }),
+      }, token);
+
+      if (data.messages && data.messages.length > 0) {
+        for (const msg of data.messages) {
+          await insertLocalMessage({
+            id: msg.id,
+            conversationId: msg.conversationId,
+            senderId: msg.senderId,
+            sequence: msg.sequence,
+            type: msg.type || 'text',
+            content: msg.content,
+            status: 'delivered',
+            createdAt: msg.createdAt,
+          });
+        }
+        loadMessages();
+      }
+    } catch (e) {
+      // Silent sync catch
+    }
+  };
+
   const loadMessages = async () => {
     if (!conversationId) return;
     const list = await getMessagesForConversation(conversationId as string, 100);
@@ -64,9 +106,10 @@ export default function ChatRoomScreen() {
   const handleSendMessage = async () => {
     if (!inputText.trim() || !currentUser || !conversationId) return;
 
-    const messageId = 'msg_' + crypto.randomUUID().replace(/-/g, '').substring(0, 12);
+    const messageId = generateMessageId();
     const nextSequence = messages.length > 0 ? messages[messages.length - 1].sequence + 1 : 1;
     const createdAt = new Date().toISOString();
+    const textToSend = inputText.trim();
 
     const newMsg = {
       id: messageId,
@@ -74,23 +117,46 @@ export default function ChatRoomScreen() {
       senderId: currentUser.id,
       sequence: nextSequence,
       type: 'text',
-      content: inputText.trim(),
+      content: textToSend,
       status: 'pending' as const,
       createdAt,
     };
 
+    // 1. Instantly save to phone's local SQLite database
     await insertLocalMessage(newMsg);
     setInputText('');
     await loadMessages();
 
-    socketService.send({
+    // 2. Try WebSocket delivery first
+    const wsSent = socketService.send({
       event: 'send_message',
       id: messageId,
       conversationId: conversationId as string,
       recipientId: otherUserId,
       type: 'text',
-      content: newMsg.content,
+      content: textToSend,
     });
+
+    // 3. Fallback to Cloudflare Workers REST API if WebSocket is reconnecting
+    if (!wsSent) {
+      try {
+        const res = await apiRequest('/api/messages/send', {
+          method: 'POST',
+          body: JSON.stringify({
+            id: messageId,
+            conversationId: conversationId as string,
+            recipientId: otherUserId,
+            type: 'text',
+            content: textToSend,
+          }),
+        }, token);
+
+        await updateMessageStatus(messageId, res.status || 'sent');
+        await loadMessages();
+      } catch (err) {
+        console.log('[Message API] Queued locally in SQLite:', err);
+      }
+    }
   };
 
   const renderStatusIcon = (status: string) => {
