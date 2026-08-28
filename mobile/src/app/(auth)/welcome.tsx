@@ -14,17 +14,25 @@ export default function WelcomeScreen() {
         </View>
         <Text style={styles.title}>Welcome to Qwink</Text>
         <Text style={styles.subtitle}>
-          Private. Lightweight. Yours. Simple, low-data messaging with auto-assigned virtual numbers.
+          Private. Lightweight. Yours. Low-data messaging with auto-assigned virtual numbers.
         </Text>
       </View>
 
       <View style={styles.footer}>
         <TouchableOpacity
-          style={styles.button}
+          style={styles.primaryButton}
           onPress={() => router.push('/(auth)/register')}
           activeOpacity={0.8}
         >
-          <Text style={styles.buttonText}>Agree & Continue</Text>
+          <Text style={styles.primaryButtonText}>Create New Account</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={() => router.push('/(auth)/login')}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.secondaryButtonText}>Log In</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -77,15 +85,29 @@ const styles = StyleSheet.create({
   },
   footer: {
     width: '100%',
+    gap: 12,
   },
-  button: {
+  primaryButton: {
     backgroundColor: Colors.light.primary,
     paddingVertical: 16,
     borderRadius: 28,
     alignItems: 'center',
   },
-  buttonText: {
+  primaryButtonText: {
     color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  secondaryButton: {
+    backgroundColor: '#F0F2F5',
+    paddingVertical: 16,
+    borderRadius: 28,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.light.border,
+  },
+  secondaryButtonText: {
+    color: Colors.light.textPrimary,
     fontSize: 16,
     fontWeight: 'bold',
   },
