@@ -29,7 +29,7 @@ export async function handleWebSocketUpgrade(
   // Update user online status
   await env.DB.prepare('UPDATE users SET is_online = 1 WHERE id = ?').bind(user.userId).run();
 
-  // 1. Deliver pending offline messages from D1
+  // Deliver pending offline messages from D1
   try {
     const pending = await env.DB.prepare(
       'SELECT * FROM pending_messages WHERE recipient_id = ? ORDER BY sequence ASC'
@@ -74,23 +74,33 @@ export async function handleWebSocketUpgrade(
           if (recipientSocket && recipientSocket.readyState === WebSocket.OPEN) {
             // Online delivery via WebSocket
             recipientSocket.send(payloadString);
+
+            // Notify sender immediately that message was delivered to recipient
+            server.send(
+              JSON.stringify({
+                event: 'delivery_receipt',
+                messageId: data.id,
+                conversationId: data.conversationId,
+                status: 'delivered',
+              })
+            );
           } else {
             // Recipient OFFLINE: queue in D1 pending_messages table
             await env.DB.prepare(`
               INSERT INTO pending_messages (id, conversation_id, sender_id, recipient_id, sequence, encrypted_payload)
               VALUES (?, ?, ?, ?, ?, ?)
             `).bind(data.id, data.conversationId, user.userId, data.recipientId, sequence, payloadString).run();
-          }
 
-          // Return ACK to sender
-          server.send(
-            JSON.stringify({
-              event: 'delivery_receipt',
-              messageId: data.id,
-              conversationId: data.conversationId,
-              status: recipientSocket ? 'delivered' : 'sent',
-            })
-          );
+            // Notify sender that message was sent to server
+            server.send(
+              JSON.stringify({
+                event: 'delivery_receipt',
+                messageId: data.id,
+                conversationId: data.conversationId,
+                status: 'sent',
+              })
+            );
+          }
           break;
         }
 
@@ -101,16 +111,19 @@ export async function handleWebSocketUpgrade(
           ).bind(data.messageId, user.userId).run();
 
           // Notify sender of delivery receipt
-          const senderSocket = ConnectionManager.get(data.senderId);
-          if (senderSocket && senderSocket.readyState === WebSocket.OPEN) {
-            senderSocket.send(
-              JSON.stringify({
-                event: 'delivery_receipt',
-                messageId: data.messageId,
-                conversationId: data.conversationId,
-                status: 'delivered',
-              })
-            );
+          const senderId = data.senderId;
+          if (senderId) {
+            const senderSocket = ConnectionManager.get(senderId);
+            if (senderSocket && senderSocket.readyState === WebSocket.OPEN) {
+              senderSocket.send(
+                JSON.stringify({
+                  event: 'delivery_receipt',
+                  messageId: data.messageId,
+                  conversationId: data.conversationId,
+                  status: 'delivered',
+                })
+              );
+            }
           }
           break;
         }
