@@ -6,8 +6,9 @@ dist/
 *.log
 .DS_Store
 
-# Exclude local artifacts & UI mockups from Git
+# Exclude local artifacts, UI mockups, and graphify output from Git
 IMPLEMENTATION_PLAN.md
 AgentSkills.md
 UI/
 Untracked/
+graphify-out/
