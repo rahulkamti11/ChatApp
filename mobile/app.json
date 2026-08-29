@@ -2,7 +2,7 @@
   "expo": {
     "name": "Qwink",
     "slug": "qwink",
-    "version": "1.0.0",
+    "version": "0.0.1",
     "orientation": "portrait",
     "scheme": "qwink",
     "userInterfaceStyle": "automatic",
@@ -12,16 +12,24 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.rahulkamti.qwink"
+      "bundleIdentifier": "com.qwink.app"
     },
     "android": {
-      "package": "com.rahulkamti.qwink"
+      "package": "com.qwink.app"
     },
     "web": {
       "bundler": "metro"
     },
     "plugins": [
       "expo-router"
-    ]
+    ],
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "9527b143-e302-4e96-ae34-43b6263852bc"
+      }
+    }
   }
 }
