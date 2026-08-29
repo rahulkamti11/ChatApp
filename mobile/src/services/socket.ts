@@ -1,6 +1,8 @@
 import { insertLocalMessage, updateMessageStatus } from '../db/queries/messages';
 
-const WS_URL = 'wss://chatapp-backend.kamti03rahul.workers.dev/ws';
+const DEV_PC_IP = '10.60.145.14';
+const CLOUDFLARE_WS_URL = 'wss://chatapp-backend.rahulkamti11.workers.dev/ws';
+const LOCAL_WS_URL = `ws://${DEV_PC_IP}:8787/ws`;
 
 class SocketService {
   private ws: WebSocket | null = null;
@@ -15,39 +17,37 @@ class SocketService {
     }
 
     this.isConnecting = true;
+
+    // Try local dev server first, fallback to Cloudflare
     try {
-      this.ws = new WebSocket(`${WS_URL}?token=${token}`);
-
-      this.ws.onopen = () => {
-        console.log('[WebSocket] Connected');
-        this.isConnecting = false;
-        this.emit('connection_change', { status: 'connected' });
-      };
-
-      this.ws.onmessage = async (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          await this.handleIncomingEvent(data);
-        } catch (err) {
-          // Silent parse catch
-        }
-      };
-
-      this.ws.onclose = () => {
-        this.isConnecting = false;
-        this.emit('connection_change', { status: 'disconnected' });
-        setTimeout(() => {
-          if (this.token) this.connect(this.token);
-        }, 3000);
-      };
-
-      this.ws.onerror = (error) => {
-        // Silent catch for OS socket aborts / network switches to prevent yellow toast popups
-        this.isConnecting = false;
-      };
-    } catch (e) {
-      this.isConnecting = false;
+      this.ws = new WebSocket(`${LOCAL_WS_URL}?token=${token}`);
+    } catch {
+      this.ws = new WebSocket(`${CLOUDFLARE_WS_URL}?token=${token}`);
     }
+
+    this.ws.onopen = () => {
+      console.log('[WebSocket] Connected');
+      this.isConnecting = false;
+      this.emit('connection_change', { status: 'connected' });
+    };
+
+    this.ws.onmessage = async (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        await this.handleIncomingEvent(data);
+      } catch (err) {
+        console.error('[WebSocket] Error parsing message:', err);
+      }
+    };
+
+    this.ws.onclose = () => {
+      this.isConnecting = false;
+      this.emit('connection_change', { status: 'disconnected' });
+    };
+
+    this.ws.onerror = (error) => {
+      // Quietly ignore connection errors during offline preview mode
+    };
   }
 
   private async handleIncomingEvent(data: any) {
@@ -86,16 +86,10 @@ class SocketService {
     }
   }
 
-  public isConnected(): boolean {
-    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
-  }
-
-  public send(payload: any): boolean {
+  public send(payload: any) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(payload));
-      return true;
     }
-    return false;
   }
 
   public on(event: string, callback: (data: any) => void) {

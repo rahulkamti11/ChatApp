@@ -15,6 +15,7 @@ import { getLocalDatabase } from '../../db/client';
 import { apiRequest } from '../../services/api';
 import { useAuthStore } from '../../store/auth';
 import { Colors } from '../../theme/colors';
+import { getDirectConversationId } from '../../utils/conversation';
 
 export default function ChatsScreen() {
   const router = useRouter();
@@ -58,8 +59,11 @@ export default function ChatsScreen() {
   };
 
   const handleStartChat = async (targetUser: any) => {
+    if (!currentUser) return;
     setIsNewChatModalVisible(false);
-    const convId = `conv_${targetUser.id}`;
+
+    // Compute deterministic 1-on-1 direct conversation ID shared by both users
+    const convId = getDirectConversationId(currentUser.id, targetUser.id);
     
     const db = await getLocalDatabase();
     await db.runAsync(
