@@ -25,6 +25,7 @@
     },
     "plugins": [
       "expo-router",
+      "./plugins/withFixedGradle",
       [
         "expo-build-properties",
         {
