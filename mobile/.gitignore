@@ -1,0 +1,8 @@
+# Ignore native build directories for Continuous Native Generation (CNG)
+android/
+ios/
+.expo/
+node_modules/
+
+# Include parent monorepo shared types in EAS cloud upload archive
+!../shared
