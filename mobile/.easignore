@@ -1,0 +1,2 @@
+# Include parent monorepo shared types in EAS cloud upload archive
+!../shared

@@ -20,8 +20,19 @@
     "web": {
       "bundler": "metro"
     },
+    "experiments": {
+      "autolinkingModuleResolution": true
+    },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "kotlinVersion": "2.0.21"
+          }
+        }
+      ]
     ],
     "extra": {
       "router": {
