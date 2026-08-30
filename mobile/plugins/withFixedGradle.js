@@ -2,10 +2,11 @@ const { withAppBuildGradle } = require('@expo/config-plugins');
 
 module.exports = function withFixedGradle(config) {
   return withAppBuildGradle(config, (config) => {
-    if (config.modResults.contents.includes('enableBundleCompression')) {
+    if (config.modResults && config.modResults.contents) {
+      // Strip any line containing enableBundleCompression regardless of \n or \r\n line endings
       config.modResults.contents = config.modResults.contents.replace(
-        /enableBundleCompression = .*\n/g,
-        '// enableBundleCompression removed for RN 0.76 compatibility\n'
+        /.*enableBundleCompression.*/g,
+        '// enableBundleCompression removed for RN 0.76 compatibility'
       );
     }
     return config;

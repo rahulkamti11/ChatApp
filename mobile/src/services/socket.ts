@@ -1,8 +1,7 @@
 import { insertLocalMessage, updateMessageStatus } from '../db/queries/messages';
 
-const DEV_PC_IP = '10.60.145.14';
-const CLOUDFLARE_WS_URL = 'wss://chatapp-backend.rahulkamti11.workers.dev/ws';
-const LOCAL_WS_URL = `ws://${DEV_PC_IP}:8787/ws`;
+// Production Cloudflare Workers WebSocket endpoint
+const CLOUDFLARE_WS_URL = 'wss://chatapp-backend.kamti03rahul.workers.dev/ws';
 
 class SocketService {
   private ws: WebSocket | null = null;
@@ -18,15 +17,11 @@ class SocketService {
 
     this.isConnecting = true;
 
-    // Try local dev server first, fallback to Cloudflare
-    try {
-      this.ws = new WebSocket(`${LOCAL_WS_URL}?token=${token}`);
-    } catch {
-      this.ws = new WebSocket(`${CLOUDFLARE_WS_URL}?token=${token}`);
-    }
+    // Connect directly to Cloudflare Workers production endpoint
+    this.ws = new WebSocket(`${CLOUDFLARE_WS_URL}?token=${token}`);
 
     this.ws.onopen = () => {
-      console.log('[WebSocket] Connected');
+      console.log('[WebSocket] Connected to Cloudflare Workers');
       this.isConnecting = false;
       this.emit('connection_change', { status: 'connected' });
     };
@@ -45,8 +40,8 @@ class SocketService {
       this.emit('connection_change', { status: 'disconnected' });
     };
 
-    this.ws.onerror = (error) => {
-      // Quietly ignore connection errors during offline preview mode
+    this.ws.onerror = (_error) => {
+      // Quietly ignore connection errors to avoid Expo Go toast popups
     };
   }
 
@@ -86,10 +81,14 @@ class SocketService {
     }
   }
 
-  public send(payload: any) {
+  // Returns true if the message was sent over an open WebSocket, false otherwise.
+  // The return value is used by chat/[id].tsx to decide whether to fall back to REST API.
+  public send(payload: any): boolean {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(payload));
+      return true;
     }
+    return false;
   }
 
   public on(event: string, callback: (data: any) => void) {

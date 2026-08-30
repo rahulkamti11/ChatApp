@@ -20,9 +20,6 @@
     "web": {
       "bundler": "metro"
     },
-    "experiments": {
-      "autolinkingModuleResolution": true
-    },
     "plugins": [
       "expo-router",
       "./plugins/withFixedGradle",
