@@ -1,2 +1,5 @@
-# Include parent monorepo shared types in EAS cloud upload archive
-!../shared
+.git/
+node_modules/
+.expo/
+android/
+ios/

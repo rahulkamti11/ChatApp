@@ -1,15 +1,10 @@
 {
-  "name": "chatapp-monorepo",
+  "name": "chatapp",
   "version": "1.0.0",
   "private": true,
-  "workspaces": [
-    "shared",
-    "backend",
-    "mobile"
-  ],
   "scripts": {
-    "backend:dev": "npm run dev --workspace=backend",
-    "backend:deploy": "npm run deploy --workspace=backend",
-    "mobile:start": "npm run start --workspace=mobile"
+    "backend:dev": "npm run dev --prefix backend",
+    "backend:deploy": "npm run deploy --prefix backend",
+    "mobile:start": "npm run start --prefix mobile"
   }
 }
