@@ -6,7 +6,9 @@
     "orientation": "portrait",
     "scheme": "qwink",
     "userInterfaceStyle": "automatic",
+    "icon": "./assets/images/icon.png",
     "splash": {
+      "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#128C7E"
     },
@@ -15,7 +17,11 @@
       "bundleIdentifier": "com.qwink.app"
     },
     "android": {
-      "package": "com.qwink.app"
+      "package": "com.qwink.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#128C7E"
+      }
     },
     "web": {
       "bundler": "metro"
