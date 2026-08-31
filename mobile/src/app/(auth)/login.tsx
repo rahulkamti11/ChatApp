@@ -12,7 +12,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Phone, Lock, ArrowRight } from 'lucide-react-native';
+import { Phone, Lock, ArrowRight, Eye, EyeOff } from 'lucide-react-native';
 import { apiRequest } from '../../services/api';
 import { useAuthStore } from '../../store/auth';
 import { socketService } from '../../services/socket';
@@ -24,6 +24,7 @@ export default function LoginScreen() {
 
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
@@ -100,13 +101,24 @@ export default function LoginScreen() {
             <View style={styles.inputWrapper}>
               <Lock size={20} color={Colors.light.textSecondary} style={styles.inputIcon} />
               <TextInput
-                style={styles.input}
+                style={[styles.input, { flex: 1 }]}
                 placeholder="Enter your password"
                 placeholderTextColor={Colors.light.textSecondary}
                 value={password}
                 onChangeText={setPassword}
-                secureTextEntry
+                secureTextEntry={!showPassword}
               />
+              <TouchableOpacity
+                onPress={() => setShowPassword((prev) => !prev)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                style={{ paddingHorizontal: 8 }}
+              >
+                {showPassword ? (
+                  <EyeOff size={20} color={Colors.light.textSecondary} />
+                ) : (
+                  <Eye size={20} color={Colors.light.textSecondary} />
+                )}
+              </TouchableOpacity>
             </View>
           </View>
 

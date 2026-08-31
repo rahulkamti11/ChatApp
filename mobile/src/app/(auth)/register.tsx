@@ -11,6 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Eye, EyeOff } from 'lucide-react-native';
 import { apiRequest } from '../../services/api';
 import { useAuthStore } from '../../store/auth';
 import { socketService } from '../../services/socket';
@@ -23,6 +24,7 @@ export default function RegisterScreen() {
   const [displayName, setDisplayName] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleRegister = async () => {
@@ -111,14 +113,27 @@ export default function RegisterScreen() {
         />
 
         <Text style={styles.label}>Password *</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Choose a secure password"
-          placeholderTextColor="#8696A0"
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-        />
+        <View style={styles.passwordWrapper}>
+          <TextInput
+            style={[styles.input, { flex: 1, marginBottom: 0 }]}
+            placeholder="Choose a secure password"
+            placeholderTextColor="#8696A0"
+            secureTextEntry={!showPassword}
+            value={password}
+            onChangeText={setPassword}
+          />
+          <TouchableOpacity
+            onPress={() => setShowPassword((prev) => !prev)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            style={styles.eyeIcon}
+          >
+            {showPassword ? (
+              <EyeOff size={20} color="#8696A0" />
+            ) : (
+              <Eye size={20} color="#8696A0" />
+            )}
+          </TouchableOpacity>
+        </View>
 
         <TouchableOpacity
           style={[styles.button, loading && styles.buttonDisabled]}
@@ -213,5 +228,14 @@ const styles = StyleSheet.create({
   footerHighlight: {
     color: Colors.light.primary,
     fontWeight: 'bold',
+  },
+  passwordWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  eyeIcon: {
+    position: 'absolute',
+    right: 16,
   },
 });
