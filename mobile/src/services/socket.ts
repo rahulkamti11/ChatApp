@@ -81,6 +81,10 @@ class SocketService {
     }
   }
 
+  public isConnected(): boolean {
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
   // Returns true if the message was sent over an open WebSocket, false otherwise.
   // The return value is used by chat/[id].tsx to decide whether to fall back to REST API.
   public send(payload: any): boolean {

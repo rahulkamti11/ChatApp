@@ -30,7 +30,7 @@ export default function TabsLayout() {
         options={{
           title: 'Qwink',
           tabBarLabel: 'Chats',
-          tabBarIcon: ({ color, size }) => <MessageSquare color={color} size={size} />,
+          tabBarIcon: ({ color, size }: { color: string; size: number }) => <MessageSquare color={color} size={size} />,
         }}
       />
       <Tabs.Screen
@@ -38,7 +38,7 @@ export default function TabsLayout() {
         options={{
           title: 'Calls',
           tabBarLabel: 'Calls',
-          tabBarIcon: ({ color, size }) => <Phone color={color} size={size} />,
+          tabBarIcon: ({ color, size }: { color: string; size: number }) => <Phone color={color} size={size} />,
         }}
       />
       <Tabs.Screen
@@ -46,7 +46,7 @@ export default function TabsLayout() {
         options={{
           title: 'Settings',
           tabBarLabel: 'Settings',
-          tabBarIcon: ({ color, size }) => <Settings color={color} size={size} />,
+          tabBarIcon: ({ color, size }: { color: string; size: number }) => <Settings color={color} size={size} />,
         }}
       />
     </Tabs>
