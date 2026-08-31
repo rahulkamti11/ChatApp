@@ -19,6 +19,7 @@ export default function RootLayout() {
           headerStyle: { backgroundColor: Colors.light.headerBackground },
           headerTintColor: '#FFFFFF',
           headerTitleStyle: { fontWeight: 'bold' },
+          contentStyle: { backgroundColor: '#FFFFFF' },
         }}
       >
         <Stack.Screen name="index" options={{ headerShown: false }} />
