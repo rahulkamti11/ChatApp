@@ -10,6 +10,7 @@ import {
   Platform,
 } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Send, Check, CheckCheck } from 'lucide-react-native';
 import { getMessagesForConversation, insertLocalMessage, updateMessageStatus } from '../../db/queries/messages';
 import { socketService } from '../../services/socket';
@@ -22,6 +23,7 @@ function generateMessageId(): string {
 }
 
 export default function ChatRoomScreen() {
+  const insets = useSafeAreaInsets();
   const { id: conversationId, otherUserId, otherDisplayName } = useLocalSearchParams<{
     id: string;
     otherUserId: string;
@@ -51,8 +53,27 @@ export default function ChatRoomScreen() {
     // 2. Poll for pending/missed messages from server
     syncMissedMessages();
 
+    // 3. Periodic background sync while chat is actively open
+    const pollTimer = setInterval(() => {
+      syncMissedMessages();
+    }, 2500);
+
     const unsubscribeMsg = socketService.on('message_received', (data: any) => {
       if (data.conversationId === conversationId) {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === data.id)) return prev;
+          const newMsg = {
+            id: data.id,
+            conversation_id: data.conversationId,
+            sender_id: data.senderId,
+            sequence: data.sequence,
+            type: data.type || 'text',
+            content: data.content,
+            status: 'delivered',
+            created_at: data.createdAt || new Date().toISOString(),
+          };
+          return [...prev, newMsg];
+        });
         loadMessages();
       }
     });
@@ -64,6 +85,7 @@ export default function ChatRoomScreen() {
     });
 
     return () => {
+      clearInterval(pollTimer);
       unsubscribeMsg();
       unsubscribeReceipt();
     };
@@ -175,8 +197,8 @@ export default function ChatRoomScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 25}
     >
       <FlatList
         ref={flatListRef}
@@ -207,7 +229,7 @@ export default function ChatRoomScreen() {
         }}
       />
 
-      <View style={styles.inputContainer}>
+      <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
         <TextInput
           style={styles.input}
           placeholder="Type a message..."
