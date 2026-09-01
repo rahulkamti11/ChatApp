@@ -127,6 +127,23 @@ export async function handleWebSocketUpgrade(
           }
           break;
         }
+
+        case 'read_receipt': {
+          const senderId = data.senderId;
+          if (senderId) {
+            const senderSocket = ConnectionManager.get(senderId);
+            if (senderSocket && senderSocket.readyState === WebSocket.OPEN) {
+              senderSocket.send(
+                JSON.stringify({
+                  event: 'delivery_receipt',
+                  conversationId: data.conversationId,
+                  status: 'read',
+                })
+              );
+            }
+          }
+          break;
+        }
       }
     } catch (err) {
       console.error('[WS] Error processing message:', err);
