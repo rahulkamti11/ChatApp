@@ -15,6 +15,8 @@ export interface LocalMessageInput {
   status: 'pending' | 'sent' | 'delivered' | 'read';
   disappearMode?: string | null;
   createdAt: string;
+  otherUserId?: string;
+  otherDisplayName?: string;
 }
 
 export async function insertLocalMessage(msg: LocalMessageInput): Promise<void> {
@@ -43,7 +45,7 @@ export async function insertLocalMessage(msg: LocalMessageInput): Promise<void> 
     ]
   );
 
-  await db.runAsync(
+  const res = await db.runAsync(
     `UPDATE local_conversations SET
       last_message_preview = ?,
       last_message_at = ?,
@@ -51,6 +53,18 @@ export async function insertLocalMessage(msg: LocalMessageInput): Promise<void> 
     WHERE id = ?`,
     [msg.content || '[Media]', msg.createdAt, msg.sequence, msg.conversationId]
   );
+
+  // If conversation does not exist yet (e.g. first incoming message from another user)
+  if (res.changes === 0) {
+    const otherId = msg.otherUserId || msg.senderId;
+    const displayName = msg.otherDisplayName || ('User ' + otherId.substring(0, 5));
+    await db.runAsync(
+      `INSERT INTO local_conversations (
+        id, type, other_user_id, other_display_name, last_message_preview, last_message_at, last_sequence, updated_at
+      ) VALUES (?, 'direct', ?, ?, ?, ?, ?, datetime('now'))`,
+      [msg.conversationId, otherId, displayName, msg.content || '[Media]', msg.createdAt, msg.sequence]
+    );
+  }
 }
 
 export async function getMessagesForConversation(
@@ -70,7 +84,7 @@ export async function getMessagesForConversation(
 
 export async function updateMessageStatus(
   messageId: string,
-  status: 'sent' | 'delivered' | 'read'
+  status: 'pending' | 'sent' | 'delivered' | 'read'
 ): Promise<void> {
   const db = await getLocalDatabase();
   await db.runAsync(
@@ -78,3 +92,26 @@ export async function updateMessageStatus(
     [status, messageId]
   );
 }
+
+export async function updateConversationMessagesStatus(
+  conversationId: string,
+  status: 'delivered' | 'read'
+): Promise<void> {
+  const db = await getLocalDatabase();
+  await db.runAsync(
+    `UPDATE local_messages SET status = ? WHERE conversation_id = ? AND status != 'read'`,
+    [status, conversationId]
+  );
+}
+
+export async function getPendingOutboxMessages(): Promise<any[]> {
+  const db = await getLocalDatabase();
+  return await db.getAllAsync(
+    `SELECT m.*, c.other_user_id as recipient_id
+     FROM local_messages m
+     LEFT JOIN local_conversations c ON m.conversation_id = c.id
+     WHERE m.status = 'pending'
+     ORDER BY m.sequence ASC`
+  );
+}
+

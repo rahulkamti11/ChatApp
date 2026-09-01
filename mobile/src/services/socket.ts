@@ -1,4 +1,5 @@
-import { insertLocalMessage, updateMessageStatus } from '../db/queries/messages';
+import { insertLocalMessage, updateMessageStatus, updateConversationMessagesStatus } from '../db/queries/messages';
+import { flushOutbox } from './outbox';
 
 // Production Cloudflare Workers WebSocket endpoint
 const CLOUDFLARE_WS_URL = 'wss://chatapp-backend.kamti03rahul.workers.dev/ws';
@@ -24,6 +25,8 @@ class SocketService {
       console.log('[WebSocket] Connected to Cloudflare Workers');
       this.isConnecting = false;
       this.emit('connection_change', { status: 'connected' });
+      // Flush any queued offline messages
+      flushOutbox(this.token);
     };
 
     this.ws.onmessage = async (event) => {
@@ -60,18 +63,25 @@ class SocketService {
           replyToId: data.replyToId,
           status: 'delivered',
           createdAt: data.createdAt || new Date().toISOString(),
+          otherUserId: data.senderId,
         });
 
         this.send({
           event: 'ack',
           messageId: data.id,
           conversationId: data.conversationId,
+          senderId: data.senderId,
           sequence: data.sequence,
         });
         break;
 
       case 'delivery_receipt':
-        await updateMessageStatus(data.messageId, data.status);
+        if (data.messageId) {
+          await updateMessageStatus(data.messageId, data.status);
+        }
+        if (data.conversationId && data.status === 'read') {
+          await updateConversationMessagesStatus(data.conversationId, 'read');
+        }
         break;
     }
 
