@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,11 +9,12 @@ import {
   Modal,
   Alert,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Search, Plus, MessageSquare } from 'lucide-react-native';
 import { getLocalDatabase } from '../../db/client';
 import { apiRequest } from '../../services/api';
 import { useAuthStore } from '../../store/auth';
+import { socketService } from '../../services/socket';
 import { Colors } from '../../theme/colors';
 import { getDirectConversationId } from '../../utils/conversation';
 
@@ -29,8 +30,22 @@ export default function ChatsScreen() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
 
+  useFocusEffect(
+    useCallback(() => {
+      loadLocalConversations();
+    }, [])
+  );
+
   useEffect(() => {
     loadLocalConversations();
+
+    const unsubMsg = socketService.on('message_received', () => {
+      loadLocalConversations();
+    });
+
+    return () => {
+      unsubMsg();
+    };
   }, []);
 
   const loadLocalConversations = async () => {
@@ -340,6 +355,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 44,
     fontSize: 14,
+    color: '#111B21',
+    backgroundColor: '#FFFFFF',
   },
   modalSearchBtn: {
     backgroundColor: Colors.light.primary,
