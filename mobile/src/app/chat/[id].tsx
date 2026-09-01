@@ -11,10 +11,11 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Send, Check, CheckCheck } from 'lucide-react-native';
+import { Send, Check, CheckCheck, Clock } from 'lucide-react-native';
 import { getMessagesForConversation, insertLocalMessage, updateMessageStatus } from '../../db/queries/messages';
 import { socketService } from '../../services/socket';
 import { apiRequest } from '../../services/api';
+import { flushOutbox } from '../../services/outbox';
 import { useAuthStore } from '../../store/auth';
 import { Colors } from '../../theme/colors';
 
@@ -50,12 +51,25 @@ export default function ChatRoomScreen() {
       socketService.connect(token);
     }
 
-    // 2. Poll for pending/missed messages from server
+    // 2. Flush any pending offline outbox messages
+    flushOutbox(token);
+
+    // 3. Mark messages as read by notifying the sender
+    if (otherUserId) {
+      socketService.send({
+        event: 'read_receipt',
+        conversationId: conversationId as string,
+        senderId: otherUserId,
+      });
+    }
+
+    // 4. Poll for pending/missed messages from server
     syncMissedMessages();
 
-    // 3. Periodic background sync while chat is actively open
+    // 5. Periodic background sync while chat is actively open
     const pollTimer = setInterval(() => {
       syncMissedMessages();
+      flushOutbox(token);
     }, 2500);
 
     const unsubscribeMsg = socketService.on('message_received', (data: any) => {
@@ -189,8 +203,10 @@ export default function ChatRoomScreen() {
         return <CheckCheck size={16} color={Colors.light.checkGray} />;
       case 'sent':
         return <Check size={16} color={Colors.light.checkGray} />;
+      case 'pending':
+        return <Clock size={13} color={Colors.light.checkGray} />;
       default:
-        return <Check size={16} color={Colors.light.checkGray} />;
+        return <Clock size={13} color={Colors.light.checkGray} />;
     }
   };
 
@@ -198,7 +214,7 @@ export default function ChatRoomScreen() {
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 25}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 85}
     >
       <FlatList
         ref={flatListRef}
