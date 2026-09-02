@@ -2,7 +2,7 @@
   "expo": {
     "name": "Qwink",
     "slug": "qwink",
-    "version": "0.1.3",
+    "version": "0.1.4",
     "orientation": "portrait",
     "scheme": "qwink",
     "userInterfaceStyle": "automatic",
