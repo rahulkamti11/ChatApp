@@ -18,6 +18,7 @@
     },
     "android": {
       "package": "com.qwink.app",
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#128C7E"
