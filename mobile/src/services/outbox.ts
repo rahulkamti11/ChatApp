@@ -4,7 +4,7 @@ import { apiRequest } from './api';
 
 let isFlushing = false;
 
-export async function flushOutbox(token: string | null): Promise<void> {
+export async function flushOutbox(token: string | null, onMessageSent?: () => void): Promise<void> {
   if (!token || isFlushing) return;
   isFlushing = true;
 
@@ -15,8 +15,14 @@ export async function flushOutbox(token: string | null): Promise<void> {
       return;
     }
 
+    let anySent = false;
+
     for (const msg of pendingMessages) {
-      const recipientId = msg.recipient_id;
+      let recipientId = msg.recipient_id;
+      if (!recipientId && msg.conversation_id && msg.conversation_id.includes('_')) {
+        const parts = msg.conversation_id.split('_');
+        recipientId = parts.find((p: string) => p !== msg.sender_id);
+      }
       if (!recipientId) continue;
 
       let sent = false;
@@ -33,7 +39,7 @@ export async function flushOutbox(token: string | null): Promise<void> {
         });
       }
 
-      // 2. Fallback to REST API if WebSocket failed
+      // 2. Fallback to REST API if WebSocket not open
       if (!sent) {
         try {
           const res = await apiRequest('/api/messages/send', {
@@ -46,7 +52,7 @@ export async function flushOutbox(token: string | null): Promise<void> {
               content: msg.content,
             }),
           }, token);
-          if (res && res.status) {
+          if (res && (res.status === 'sent' || res.status === 'delivered')) {
             sent = true;
           }
         } catch (e) {
@@ -57,6 +63,14 @@ export async function flushOutbox(token: string | null): Promise<void> {
 
       if (sent) {
         await updateMessageStatus(msg.id, 'sent');
+        anySent = true;
+      }
+    }
+
+    if (anySent) {
+      socketService.emit('outbox_flushed', {});
+      if (onMessageSent) {
+        onMessageSent();
       }
     }
   } catch (err) {

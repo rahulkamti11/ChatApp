@@ -9,6 +9,7 @@
     "d1:seed": "wrangler d1 execute chatapp-d1 --file=./db/seed.sql"
   },
   "dependencies": {
+    "chatapp-backend": "file:",
     "hono": "^4.0.0",
     "zod": "^3.22.4"
   },

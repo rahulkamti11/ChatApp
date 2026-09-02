@@ -8,6 +8,7 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
 } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,7 +38,17 @@ export default function ChatRoomScreen() {
 
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState('');
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener('keyboardDidShow', () => setIsKeyboardVisible(true));
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => setIsKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   useEffect(() => {
     navigation.setOptions({
@@ -98,10 +109,22 @@ export default function ChatRoomScreen() {
       }
     });
 
+    const unsubscribeOutbox = socketService.on('outbox_flushed', () => {
+      loadMessages();
+    });
+
+    const unsubscribeConn = socketService.on('connection_change', (data: any) => {
+      if (data.status === 'connected') {
+        flushOutbox(token, () => loadMessages());
+      }
+    });
+
     return () => {
       clearInterval(pollTimer);
       unsubscribeMsg();
       unsubscribeReceipt();
+      unsubscribeOutbox();
+      unsubscribeConn();
     };
   }, [conversationId]);
 
@@ -213,8 +236,8 @@ export default function ChatRoomScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 85}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
       <FlatList
         ref={flatListRef}
@@ -245,7 +268,14 @@ export default function ChatRoomScreen() {
         }}
       />
 
-      <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+      <View
+        style={[
+          styles.inputContainer,
+          {
+            paddingBottom: isKeyboardVisible ? 8 : Math.max(insets.bottom, 8),
+          },
+        ]}
+      >
         <TextInput
           style={styles.input}
           placeholder="Type a message..."

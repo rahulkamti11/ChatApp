@@ -9,43 +9,69 @@ class SocketService {
   private token: string | null = null;
   private listeners: Map<string, Set<(data: any) => void>> = new Map();
   private isConnecting: boolean = false;
+  private reconnectTimer: any = null;
 
   public connect(token: string) {
     this.token = token;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
 
     this.isConnecting = true;
 
-    // Connect directly to Cloudflare Workers production endpoint
-    this.ws = new WebSocket(`${CLOUDFLARE_WS_URL}?token=${token}`);
+    try {
+      this.ws = new WebSocket(`${CLOUDFLARE_WS_URL}?token=${token}`);
 
-    this.ws.onopen = () => {
-      console.log('[WebSocket] Connected to Cloudflare Workers');
+      this.ws.onopen = () => {
+        console.log('[WebSocket] Connected to Cloudflare Workers');
+        this.isConnecting = false;
+        this.emit('connection_change', { status: 'connected' });
+        flushOutbox(this.token);
+      };
+
+      this.ws.onmessage = async (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          await this.handleIncomingEvent(data);
+        } catch (err) {
+          console.error('[WebSocket] Error parsing message:', err);
+        }
+      };
+
+      this.ws.onclose = () => {
+        this.isConnecting = false;
+        this.emit('connection_change', { status: 'disconnected' });
+        this.scheduleReconnect();
+      };
+
+      this.ws.onerror = (_error) => {
+        this.isConnecting = false;
+        if (this.ws) {
+          try {
+            this.ws.close();
+          } catch (e) {}
+        }
+        this.scheduleReconnect();
+      };
+    } catch (e) {
       this.isConnecting = false;
-      this.emit('connection_change', { status: 'connected' });
-      // Flush any queued offline messages
-      flushOutbox(this.token);
-    };
+      this.scheduleReconnect();
+    }
+  }
 
-    this.ws.onmessage = async (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        await this.handleIncomingEvent(data);
-      } catch (err) {
-        console.error('[WebSocket] Error parsing message:', err);
+  private scheduleReconnect() {
+    if (this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.token) {
+        this.connect(this.token);
       }
-    };
-
-    this.ws.onclose = () => {
-      this.isConnecting = false;
-      this.emit('connection_change', { status: 'disconnected' });
-    };
-
-    this.ws.onerror = (_error) => {
-      // Quietly ignore connection errors to avoid Expo Go toast popups
-    };
+    }, 2500);
   }
 
   private async handleIncomingEvent(data: any) {
