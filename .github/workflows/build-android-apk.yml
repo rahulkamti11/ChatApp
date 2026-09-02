@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: ☕ Set up Java (JDK 17)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -51,18 +51,9 @@ jobs:
         run: |
           npx expo prebuild --platform android --clean
 
-      - name: 🔑 Generate Self-Signed Keystore for Release
-        working-directory: mobile/android/app
+      - name: 🔑 Copy Permanent Release Keystore
         run: |
-          keytool -genkeypair -v \
-            -keystore release.keystore \
-            -alias qwink-key \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -storepass android \
-            -keypass android \
-            -dname "CN=Qwink, OU=Mobile, O=Qwink, L=NewDelhi, S=Delhi, C=IN"
+          cp mobile/credentials/release.keystore mobile/android/app/release.keystore
 
       - name: 🔨 Build Android Release APK
         working-directory: mobile/android
@@ -72,9 +63,9 @@ jobs:
           ./gradlew assembleRelease \
             -PreactNativeArchitectures=armeabi-v7a,arm64-v8a \
             -Pandroid.injected.signing.store.file=$(pwd)/app/release.keystore \
-            -Pandroid.injected.signing.store.password=android \
+            -Pandroid.injected.signing.store.password=qwinkpass2026 \
             -Pandroid.injected.signing.key.alias=qwink-key \
-            -Pandroid.injected.signing.key.password=android
+            -Pandroid.injected.signing.key.password=qwinkpass2026
 
       - name: 🔍 Locate Output APK
         id: find_apk
