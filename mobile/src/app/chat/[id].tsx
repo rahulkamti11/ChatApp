@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,13 +12,24 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Send, Check, CheckCheck, Clock } from 'lucide-react-native';
-import { getMessagesForConversation, insertLocalMessage, updateMessageStatus } from '../../db/queries/messages';
+import { Send, Check, CheckCheck, Clock, Star, X } from 'lucide-react-native';
+import {
+  getMessagesForConversation,
+  insertLocalMessage,
+  updateMessageStatus,
+  editLocalMessage,
+  deleteLocalMessage,
+  updateMessageReaction,
+  toggleStarMessage,
+  resetConversationUnread,
+} from '../../db/queries/messages';
 import { socketService } from '../../services/socket';
 import { apiRequest } from '../../services/api';
 import { flushOutbox } from '../../services/outbox';
 import { useAuthStore } from '../../store/auth';
 import { Colors } from '../../theme/colors';
+import { ReplyPreviewBar } from '../../components/chat/ReplyPreviewBar';
+import { MessageActionModal } from '../../components/chat/MessageActionModal';
 
 function generateMessageId(): string {
   return 'msg_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 10);
@@ -39,7 +50,18 @@ export default function ChatRoomScreen() {
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState('');
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const [presenceText, setPresenceText] = useState<string>('');
+  
+  // Phase 3 Interaction States
+  const [replyMessage, setReplyMessage] = useState<any | null>(null);
+  const [editingMessage, setEditingMessage] = useState<any | null>(null);
+  const [selectedActionMessage, setSelectedActionMessage] = useState<any | null>(null);
+  const [isActionModalVisible, setIsActionModalVisible] = useState(false);
+
   const flatListRef = useRef<FlatList>(null);
+  const typingTimeoutRef = useRef<any>(null);
+  const lastTypingSentRef = useRef<number>(0);
 
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', () => setIsKeyboardVisible(true));
@@ -50,11 +72,69 @@ export default function ChatRoomScreen() {
     };
   }, []);
 
+  // Update navigation header title and dynamic subtitle
   useEffect(() => {
-    navigation.setOptions({
-      title: otherDisplayName || 'Chat',
-    });
+    let subtitle = '';
+    if (isTyping) {
+      subtitle = 'typing...';
+    } else if (presenceText) {
+      subtitle = presenceText;
+    }
 
+    navigation.setOptions({
+      headerTitle: () => (
+        <View style={styles.headerTitleContainer}>
+          <Text style={styles.headerTitleText} numberOfLines={1}>
+            {otherDisplayName || 'Chat'}
+          </Text>
+          {subtitle ? (
+            <Text
+              style={[
+                styles.headerSubtitleText,
+                isTyping ? styles.typingSubtitle : undefined,
+              ]}
+              numberOfLines={1}
+            >
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
+      ),
+    });
+  }, [otherDisplayName, isTyping, presenceText]);
+
+  const emitReadReceipt = useCallback(() => {
+    if (!token || !conversationId) return;
+
+    // 1. Reset local unread counter
+    resetConversationUnread(conversationId);
+
+    // 2. Emit WS read_receipt to sender
+    if (otherUserId) {
+      socketService.send({
+        event: 'read_receipt',
+        conversationId: conversationId as string,
+        senderId: otherUserId,
+      });
+
+      // REST fallback
+      apiRequest('/api/messages/read', {
+        method: 'POST',
+        body: JSON.stringify({
+          conversationId,
+          senderId: otherUserId,
+        }),
+      }, token).catch(() => {});
+    }
+  }, [conversationId, otherUserId, token]);
+
+  const loadMessages = async () => {
+    if (!conversationId) return;
+    const list = await getMessagesForConversation(conversationId as string, 100);
+    setMessages(list);
+  };
+
+  useEffect(() => {
     loadMessages();
 
     // 1. Ensure WebSocket connection is active
@@ -62,48 +142,81 @@ export default function ChatRoomScreen() {
       socketService.connect(token);
     }
 
-    // 2. Flush any pending offline outbox messages
+    // 2. Flush outbox
     flushOutbox(token);
 
-    // 3. Mark messages as read by notifying the sender
+    // 3. Mark messages as read immediately on entry
+    emitReadReceipt();
+
+    // 4. Query presence
     if (otherUserId) {
       socketService.send({
-        event: 'read_receipt',
-        conversationId: conversationId as string,
-        senderId: otherUserId,
+        event: 'presence_query',
+        targetUserId: otherUserId,
       });
     }
 
-    // 4. Poll for pending/missed messages from server
+    // 5. Initial sync
     syncMissedMessages();
 
-    // 5. Periodic background sync while chat is actively open
+    // 6. Background periodic poll while active
     const pollTimer = setInterval(() => {
       syncMissedMessages();
       flushOutbox(token);
     }, 2500);
 
+    // LISTENERS
     const unsubscribeMsg = socketService.on('message_received', (data: any) => {
       if (data.conversationId === conversationId) {
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === data.id)) return prev;
-          const newMsg = {
-            id: data.id,
-            conversation_id: data.conversationId,
-            sender_id: data.senderId,
-            sequence: data.sequence,
-            type: data.type || 'text',
-            content: data.content,
-            status: 'delivered',
-            created_at: data.createdAt || new Date().toISOString(),
-          };
-          return [...prev, newMsg];
-        });
+        emitReadReceipt();
         loadMessages();
       }
     });
 
     const unsubscribeReceipt = socketService.on('delivery_receipt', (data: any) => {
+      if (data.conversationId === conversationId) {
+        loadMessages();
+      }
+    });
+
+    const unsubscribeTypingStart = socketService.on('typing_start', (data: any) => {
+      if (data.conversationId === conversationId) {
+        setIsTyping(true);
+      }
+    });
+
+    const unsubscribeTypingStop = socketService.on('typing_stop', (data: any) => {
+      if (data.conversationId === conversationId) {
+        setIsTyping(false);
+      }
+    });
+
+    const unsubscribePresence = socketService.on('user_presence', (data: any) => {
+      if (data.userId === otherUserId) {
+        if (data.isOnline) {
+          setPresenceText('Online');
+        } else if (data.lastSeenAt) {
+          const d = new Date(data.lastSeenAt);
+          setPresenceText(`Last seen ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+        } else {
+          setPresenceText('');
+        }
+      }
+    });
+
+    const unsubscribeReaction = socketService.on('message_reaction', (data: any) => {
+      if (data.conversationId === conversationId) {
+        loadMessages();
+      }
+    });
+
+    const unsubscribeEdited = socketService.on('message_edited', (data: any) => {
+      if (data.conversationId === conversationId) {
+        loadMessages();
+      }
+    });
+
+    const unsubscribeDeleted = socketService.on('message_deleted', (data: any) => {
       if (data.conversationId === conversationId) {
         loadMessages();
       }
@@ -123,10 +236,16 @@ export default function ChatRoomScreen() {
       clearInterval(pollTimer);
       unsubscribeMsg();
       unsubscribeReceipt();
+      unsubscribeTypingStart();
+      unsubscribeTypingStop();
+      unsubscribePresence();
+      unsubscribeReaction();
+      unsubscribeEdited();
+      unsubscribeDeleted();
       unsubscribeOutbox();
       unsubscribeConn();
     };
-  }, [conversationId]);
+  }, [conversationId, otherUserId, token, emitReadReceipt]);
 
   const syncMissedMessages = async () => {
     if (!token || !conversationId) return;
@@ -145,10 +264,14 @@ export default function ChatRoomScreen() {
             sequence: msg.sequence,
             type: msg.type || 'text',
             content: msg.content,
+            mediaUrl: msg.mediaUrl,
+            replyToId: msg.replyToId,
             status: 'delivered',
             createdAt: msg.createdAt,
+            isIncoming: true,
           });
         }
+        emitReadReceipt();
         loadMessages();
       }
     } catch (e) {
@@ -156,19 +279,74 @@ export default function ChatRoomScreen() {
     }
   };
 
-  const loadMessages = async () => {
-    if (!conversationId) return;
-    const list = await getMessagesForConversation(conversationId as string, 100);
-    setMessages(list);
+  // Debounced Typing Dispatcher
+  const handleInputChange = (text: string) => {
+    setInputText(text);
+
+    if (!otherUserId || !conversationId) return;
+
+    const now = Date.now();
+    if (now - lastTypingSentRef.current > 2000) {
+      lastTypingSentRef.current = now;
+      socketService.send({
+        event: 'typing_start',
+        conversationId,
+        recipientId: otherUserId,
+      });
+    }
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    typingTimeoutRef.current = setTimeout(() => {
+      socketService.send({
+        event: 'typing_stop',
+        conversationId,
+        recipientId: otherUserId,
+      });
+    }, 1500);
   };
 
   const handleSendMessage = async () => {
     if (!inputText.trim() || !currentUser || !conversationId) return;
 
+    const textToSend = inputText.trim();
+
+    // 1. IF EDITING EXISTING MESSAGE
+    if (editingMessage) {
+      const editedAt = new Date().toISOString();
+      await editLocalMessage(editingMessage.id, textToSend, editedAt);
+      setInputText('');
+      setEditingMessage(null);
+      await loadMessages();
+
+      socketService.send({
+        event: 'edit_message',
+        messageId: editingMessage.id,
+        conversationId,
+        recipientId: otherUserId,
+        content: textToSend,
+        editedAt,
+      });
+
+      apiRequest('/api/messages/edit', {
+        method: 'POST',
+        body: JSON.stringify({
+          messageId: editingMessage.id,
+          conversationId,
+          recipientId: otherUserId,
+          content: textToSend,
+        }),
+      }, token).catch(() => {});
+      return;
+    }
+
+    // 2. IF SENDING A NEW MESSAGE
     const messageId = generateMessageId();
     const nextSequence = messages.length > 0 ? messages[messages.length - 1].sequence + 1 : 1;
     const createdAt = new Date().toISOString();
-    const textToSend = inputText.trim();
+    const replyTargetId = replyMessage ? replyMessage.id : null;
 
     const newMsg = {
       id: messageId,
@@ -177,16 +355,28 @@ export default function ChatRoomScreen() {
       sequence: nextSequence,
       type: 'text',
       content: textToSend,
+      replyToId: replyTargetId,
       status: 'pending' as const,
       createdAt,
+      isIncoming: false,
     };
 
-    // 1. Instantly save to phone's local SQLite database
+    // Save locally
     await insertLocalMessage(newMsg);
     setInputText('');
+    setReplyMessage(null);
     await loadMessages();
 
-    // 2. Try WebSocket delivery first
+    // Stop typing broadcast
+    if (otherUserId) {
+      socketService.send({
+        event: 'typing_stop',
+        conversationId,
+        recipientId: otherUserId,
+      });
+    }
+
+    // Try WebSocket delivery
     const wsSent = socketService.send({
       event: 'send_message',
       id: messageId,
@@ -194,9 +384,9 @@ export default function ChatRoomScreen() {
       recipientId: otherUserId,
       type: 'text',
       content: textToSend,
+      replyToId: replyTargetId,
     });
 
-    // 3. Fallback to Cloudflare Workers REST API if WebSocket is reconnecting
     if (!wsSent) {
       try {
         const res = await apiRequest('/api/messages/send', {
@@ -207,14 +397,117 @@ export default function ChatRoomScreen() {
             recipientId: otherUserId,
             type: 'text',
             content: textToSend,
+            replyToId: replyTargetId,
           }),
         }, token);
 
         await updateMessageStatus(messageId, res.status || 'sent');
         await loadMessages();
       } catch (err) {
-        console.log('[Message API] Queued locally in SQLite:', err);
+        console.log('[Message API] Queued locally in SQLite');
       }
+    }
+  };
+
+  // Phase 3 Actions
+  const handleMessageLongPress = (item: any) => {
+    setSelectedActionMessage(item);
+    setIsActionModalVisible(true);
+  };
+
+  const handleReaction = async (messageId: string, emoji: string) => {
+    if (!currentUser) return;
+    await updateMessageReaction(messageId, currentUser.id, emoji, 'add');
+    await loadMessages();
+
+    socketService.send({
+      event: 'message_reaction',
+      messageId,
+      conversationId,
+      recipientId: otherUserId,
+      emoji,
+      action: 'add',
+    });
+
+    apiRequest('/api/messages/reaction', {
+      method: 'POST',
+      body: JSON.stringify({
+        messageId,
+        conversationId,
+        recipientId: otherUserId,
+        emoji,
+        action: 'add',
+      }),
+    }, token).catch(() => {});
+  };
+
+  const handleToggleReactionPill = async (messageId: string, emoji: string, userIds: string[]) => {
+    if (!currentUser) return;
+    const hasMyReaction = userIds.includes(currentUser.id);
+    const action = hasMyReaction ? 'remove' : 'add';
+
+    await updateMessageReaction(messageId, currentUser.id, emoji, action);
+    await loadMessages();
+
+    socketService.send({
+      event: 'message_reaction',
+      messageId,
+      conversationId,
+      recipientId: otherUserId,
+      emoji,
+      action,
+    });
+  };
+
+  const handleReply = (message: any) => {
+    setReplyMessage({
+      id: message.id,
+      sender_name: message.sender_id === currentUser?.id ? 'You' : otherDisplayName || 'Contact',
+      content: message.content,
+      isMe: message.sender_id === currentUser?.id,
+    });
+  };
+
+  const handleToggleStar = async (messageId: string, isStarred: boolean) => {
+    if (!conversationId) return;
+    await toggleStarMessage(messageId, conversationId as string, isStarred);
+    await loadMessages();
+  };
+
+  const handleEdit = (message: any) => {
+    setEditingMessage(message);
+    setInputText(message.content || '');
+  };
+
+  const handleDelete = async (messageId: string, forEveryone: boolean) => {
+    await deleteLocalMessage(messageId, forEveryone);
+    await loadMessages();
+
+    if (forEveryone) {
+      socketService.send({
+        event: 'delete_message',
+        messageId,
+        conversationId,
+        recipientId: otherUserId,
+        deleteType: 'for_everyone',
+      });
+
+      apiRequest('/api/messages/delete', {
+        method: 'POST',
+        body: JSON.stringify({
+          messageId,
+          conversationId,
+          recipientId: otherUserId,
+          deleteType: 'for_everyone',
+        }),
+      }, token).catch(() => {});
+    }
+  };
+
+  const scrollToMessage = (msgId: string) => {
+    const index = messages.findIndex((m) => m.id === msgId);
+    if (index !== -1) {
+      flatListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
     }
   };
 
@@ -233,6 +526,68 @@ export default function ChatRoomScreen() {
     }
   };
 
+  const renderQuotedSnippet = (replyToId: string) => {
+    const quoted = messages.find((m) => m.id === replyToId);
+    if (!quoted) return null;
+
+    const isQuotedMe = quoted.sender_id === currentUser?.id;
+    return (
+      <TouchableOpacity
+        style={styles.quotedContainer}
+        activeOpacity={0.8}
+        onPress={() => scrollToMessage(replyToId)}
+      >
+        <View style={styles.quotedAccentBar} />
+        <View style={styles.quotedContent}>
+          <Text style={styles.quotedAuthor}>
+            {isQuotedMe ? 'You' : otherDisplayName || 'Contact'}
+          </Text>
+          <Text style={styles.quotedText} numberOfLines={1}>
+            {quoted.is_deleted === 1 ? '🚫 This message was deleted' : quoted.content || '[Media]'}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const renderReactions = (item: any) => {
+    if (!item.reactions) return null;
+    let reactionsMap: Record<string, string[]> = {};
+    try {
+      reactionsMap = JSON.parse(item.reactions);
+    } catch (e) {
+      return null;
+    }
+
+    const emojis = Object.keys(reactionsMap);
+    if (emojis.length === 0) return null;
+
+    return (
+      <View style={styles.reactionPillsRow}>
+        {emojis.map((emoji) => {
+          const userIds = reactionsMap[emoji];
+          const hasMyReaction = currentUser ? userIds.includes(currentUser.id) : false;
+          return (
+            <TouchableOpacity
+              key={emoji}
+              style={[
+                styles.reactionPill,
+                hasMyReaction && styles.reactionPillActive,
+              ]}
+              activeOpacity={0.7}
+              onPress={() => handleToggleReactionPill(item.id, emoji, userIds)}
+            >
+              <Text style={styles.reactionPillEmoji}>{emoji}</Text>
+              {userIds.length > 1 && (
+                <Text style={styles.reactionPillCount}>{userIds.length}</Text>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    );
+  };
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -247,27 +602,80 @@ export default function ChatRoomScreen() {
         onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
         renderItem={({ item }) => {
           const isMe = item.sender_id === currentUser?.id;
+          const isDeleted = item.is_deleted === 1;
+
           return (
-            <View style={[styles.bubbleContainer, isMe ? styles.bubbleRight : styles.bubbleLeft]}>
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onLongPress={() => handleMessageLongPress(item)}
+              style={[styles.bubbleContainer, isMe ? styles.bubbleRight : styles.bubbleLeft]}
+            >
               <View style={[styles.bubble, isMe ? styles.bgSent : styles.bgReceived]}>
-                <Text style={[styles.messageText, isMe ? styles.textSent : styles.textReceived]}>
-                  {item.content}
+                {/* 1. Quoted Message Preview if replying */}
+                {item.reply_to_id && renderQuotedSnippet(item.reply_to_id)}
+
+                {/* 2. Message Content */}
+                <Text
+                  style={[
+                    styles.messageText,
+                    isMe ? styles.textSent : styles.textReceived,
+                    isDeleted && styles.deletedText,
+                  ]}
+                >
+                  {isDeleted ? '🚫 This message was deleted' : item.content}
                 </Text>
+
+                {/* 3. Footer: Timestamp, Edited tag, Star, Status */}
                 <View style={styles.bubbleFooter}>
+                  {item.is_starred === 1 && (
+                    <Star size={11} color="#F59E0B" fill="#F59E0B" style={styles.starIcon} />
+                  )}
+                  {item.is_edited === 1 && !isDeleted && (
+                    <Text style={styles.editedTag}>edited</Text>
+                  )}
                   <Text style={styles.timestamp}>
                     {new Date(item.created_at).toLocaleTimeString([], {
                       hour: '2-digit',
                       minute: '2-digit',
                     })}
                   </Text>
-                  {isMe && <View style={styles.statusIcon}>{renderStatusIcon(item.status)}</View>}
+                  {isMe && !isDeleted && (
+                    <View style={styles.statusIcon}>{renderStatusIcon(item.status)}</View>
+                  )}
                 </View>
               </View>
-            </View>
+
+              {/* 4. Emoji Reaction Pills below bubble */}
+              {renderReactions(item)}
+            </TouchableOpacity>
           );
         }}
       />
 
+      {/* Editing Message Banner */}
+      {editingMessage && (
+        <View style={styles.editingBanner}>
+          <View style={styles.editingBannerContent}>
+            <Text style={styles.editingBannerTitle}>Editing message</Text>
+            <Text style={styles.editingBannerSub} numberOfLines={1}>
+              {editingMessage.content}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => {
+              setEditingMessage(null);
+              setInputText('');
+            }}
+          >
+            <X size={18} color={Colors.light.textSecondary} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Quoted Message Preview Bar */}
+      <ReplyPreviewBar replyMessage={replyMessage} onCancel={() => setReplyMessage(null)} />
+
+      {/* Input Field */}
       <View
         style={[
           styles.inputContainer,
@@ -278,10 +686,10 @@ export default function ChatRoomScreen() {
       >
         <TextInput
           style={styles.input}
-          placeholder="Type a message..."
+          placeholder={editingMessage ? 'Edit your message...' : 'Type a message...'}
           placeholderTextColor={Colors.light.textSecondary}
           value={inputText}
-          onChangeText={setInputText}
+          onChangeText={handleInputChange}
           multiline
         />
         <TouchableOpacity
@@ -292,6 +700,19 @@ export default function ChatRoomScreen() {
           <Send size={20} color="#FFFFFF" />
         </TouchableOpacity>
       </View>
+
+      {/* Message Action Modal (Reaction dock, reply, edit, star, delete) */}
+      <MessageActionModal
+        visible={isActionModalVisible}
+        message={selectedActionMessage}
+        currentUserId={currentUser?.id}
+        onClose={() => setIsActionModalVisible(false)}
+        onReaction={handleReaction}
+        onReply={handleReply}
+        onToggleStar={handleToggleStar}
+        onEdit={handleEdit}
+        onDelete={handleDelete}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -301,13 +722,31 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.light.chatBackground,
   },
+  headerTitleContainer: {
+    justifyContent: 'center',
+  },
+  headerTitleText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  headerSubtitleText: {
+    fontSize: 12,
+    color: '#E0F2FE',
+    marginTop: 1,
+  },
+  typingSubtitle: {
+    color: '#A7F3D0',
+    fontStyle: 'italic',
+    fontWeight: '600',
+  },
   messageList: {
     paddingHorizontal: 12,
     paddingVertical: 16,
   },
   bubbleContainer: {
-    marginBottom: 8,
-    maxWidth: '80%',
+    marginBottom: 10,
+    maxWidth: '82%',
   },
   bubbleLeft: {
     alignSelf: 'flex-start',
@@ -322,7 +761,7 @@ const styles = StyleSheet.create({
     elevation: 1,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowRadius: 1,
   },
   bgSent: {
@@ -343,11 +782,24 @@ const styles = StyleSheet.create({
   textReceived: {
     color: Colors.light.textPrimary,
   },
+  deletedText: {
+    fontStyle: 'italic',
+    color: '#8696A0',
+  },
   bubbleFooter: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     alignItems: 'center',
     marginTop: 4,
+  },
+  starIcon: {
+    marginRight: 4,
+  },
+  editedTag: {
+    fontSize: 10,
+    color: Colors.light.textSecondary,
+    fontStyle: 'italic',
+    marginRight: 4,
   },
   timestamp: {
     fontSize: 10,
@@ -356,6 +808,91 @@ const styles = StyleSheet.create({
   },
   statusIcon: {
     marginLeft: 2,
+  },
+  quotedContainer: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(0, 0, 0, 0.05)',
+    borderRadius: 6,
+    padding: 6,
+    marginBottom: 6,
+  },
+  quotedAccentBar: {
+    width: 3,
+    backgroundColor: Colors.light.primary,
+    borderRadius: 2,
+    marginRight: 6,
+  },
+  quotedContent: {
+    flex: 1,
+  },
+  quotedAuthor: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: Colors.light.primary,
+    marginBottom: 1,
+  },
+  quotedText: {
+    fontSize: 12,
+    color: Colors.light.textSecondary,
+  },
+  reactionPillsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: -6,
+    marginBottom: 2,
+    paddingHorizontal: 4,
+  },
+  reactionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginRight: 4,
+    marginTop: 2,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 1,
+    borderWidth: 0.5,
+    borderColor: '#E2E8F0',
+  },
+  reactionPillActive: {
+    backgroundColor: '#E0F2FE',
+    borderColor: Colors.light.primary,
+  },
+  reactionPillEmoji: {
+    fontSize: 12,
+  },
+  reactionPillCount: {
+    fontSize: 10,
+    color: Colors.light.textSecondary,
+    marginLeft: 3,
+    fontWeight: 'bold',
+  },
+  editingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#FDE68A',
+  },
+  editingBannerContent: {
+    flex: 1,
+  },
+  editingBannerTitle: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#B45309',
+  },
+  editingBannerSub: {
+    fontSize: 13,
+    color: '#92400E',
   },
   inputContainer: {
     flexDirection: 'row',

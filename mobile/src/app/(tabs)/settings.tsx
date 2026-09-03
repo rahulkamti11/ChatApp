@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Switch, TouchableOpacity, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Shield, Cloud, LogOut } from 'lucide-react-native';
+import { Shield, Cloud, LogOut, Star, ChevronRight } from 'lucide-react-native';
 import { useAuthStore } from '../../store/auth';
 import { socketService } from '../../services/socket';
 import { Colors } from '../../theme/colors';
@@ -31,6 +31,22 @@ export default function SettingsScreen() {
           <Text style={styles.virtualNumber}>{user?.virtualNumber || '+888-0000-0000'}</Text>
           {user?.username && <Text style={styles.username}>@{user.username}</Text>}
         </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionHeader}>BOOKMARKS</Text>
+
+        <TouchableOpacity
+          style={styles.navRow}
+          activeOpacity={0.7}
+          onPress={() => router.push('/starred-messages')}
+        >
+          <View style={styles.rowLeft}>
+            <Star size={20} color="#F59E0B" />
+            <Text style={styles.rowText}>Starred Messages</Text>
+          </View>
+          <ChevronRight size={18} color={Colors.light.textSecondary} />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.section}>
@@ -124,6 +140,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: Colors.light.textSecondary,
     marginBottom: 12,
+  },
+  navRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
   },
   row: {
     flexDirection: 'row',

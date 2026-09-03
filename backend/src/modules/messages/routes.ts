@@ -3,7 +3,10 @@ import { authMiddleware } from '../../middleware/auth.js';
 import { ConnectionManager } from '../../ws/connections.js';
 import { getNextSequence } from '../../ws/sequence.js';
 
-const messages = new Hono<{ Bindings: { DB: D1Database } }>();
+const messages = new Hono<{
+  Bindings: { DB: D1Database };
+  Variables: { user: { userId: string; username?: string } };
+}>();
 messages.use('*', authMiddleware);
 
 messages.post('/send', async (c) => {
@@ -74,6 +77,119 @@ messages.post('/sync', async (c) => {
     return c.json({ messages: missedMessages });
   } catch (err: any) {
     return c.json({ error: err.message || 'Failed to sync messages' }, 500);
+  }
+});
+
+messages.post('/read', async (c) => {
+  try {
+    const authUser = c.get('user');
+    const { conversationId, senderId } = await c.req.json();
+
+    if (!conversationId) {
+      return c.json({ error: 'Missing conversationId' }, 400);
+    }
+
+    if (senderId) {
+      const senderSocket = ConnectionManager.get(senderId);
+      if (senderSocket && senderSocket.readyState === WebSocket.OPEN) {
+        senderSocket.send(
+          JSON.stringify({
+            event: 'delivery_receipt',
+            conversationId,
+            status: 'read',
+          })
+        );
+      }
+    }
+
+    return c.json({ status: 'read', conversationId });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Failed to process read receipt' }, 500);
+  }
+});
+
+messages.post('/reaction', async (c) => {
+  try {
+    const authUser = c.get('user');
+    const { messageId, conversationId, recipientId, emoji, action } = await c.req.json();
+
+    if (!messageId || !recipientId) {
+      return c.json({ error: 'Missing required parameters' }, 400);
+    }
+
+    const recipientSocket = ConnectionManager.get(recipientId);
+    if (recipientSocket && recipientSocket.readyState === WebSocket.OPEN) {
+      recipientSocket.send(
+        JSON.stringify({
+          event: 'message_reaction',
+          messageId,
+          conversationId,
+          userId: authUser.userId,
+          emoji,
+          action: action || 'add',
+        })
+      );
+    }
+
+    return c.json({ success: true, messageId, emoji, action });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Failed to process reaction' }, 500);
+  }
+});
+
+messages.post('/edit', async (c) => {
+  try {
+    const authUser = c.get('user');
+    const { messageId, conversationId, recipientId, content } = await c.req.json();
+
+    if (!messageId || !content) {
+      return c.json({ error: 'Missing required parameters' }, 400);
+    }
+
+    const editedAt = new Date().toISOString();
+    const recipientSocket = ConnectionManager.get(recipientId);
+    if (recipientSocket && recipientSocket.readyState === WebSocket.OPEN) {
+      recipientSocket.send(
+        JSON.stringify({
+          event: 'message_edited',
+          messageId,
+          conversationId,
+          content,
+          editedAt,
+        })
+      );
+    }
+
+    return c.json({ success: true, messageId, content, editedAt });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Failed to edit message' }, 500);
+  }
+});
+
+messages.post('/delete', async (c) => {
+  try {
+    const authUser = c.get('user');
+    const { messageId, conversationId, recipientId, deleteType } = await c.req.json();
+
+    if (!messageId) {
+      return c.json({ error: 'Missing required parameters' }, 400);
+    }
+
+    const recipientSocket = ConnectionManager.get(recipientId);
+    if (recipientSocket && recipientSocket.readyState === WebSocket.OPEN) {
+      recipientSocket.send(
+        JSON.stringify({
+          event: 'message_deleted',
+          messageId,
+          conversationId,
+          deleteType: deleteType || 'for_everyone',
+        })
+      );
+    }
+
+    return c.json({ success: true, messageId, deleteType: deleteType || 'for_everyone' });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Failed to delete message' }, 500);
   }
 });
 

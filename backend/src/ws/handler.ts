@@ -75,7 +75,7 @@ export async function handleWebSocketUpgrade(
             // Online delivery via WebSocket
             recipientSocket.send(payloadString);
 
-            // Notify sender immediately that message was delivered to recipient
+            // Notify sender immediately that message was delivered to recipient (Double Gray Check)
             server.send(
               JSON.stringify({
                 event: 'delivery_receipt',
@@ -91,7 +91,7 @@ export async function handleWebSocketUpgrade(
               VALUES (?, ?, ?, ?, ?, ?)
             `).bind(data.id, data.conversationId, user.userId, data.recipientId, sequence, payloadString).run();
 
-            // Notify sender that message was sent to server
+            // Notify sender that message was sent to server (Single Gray Check)
             server.send(
               JSON.stringify({
                 event: 'delivery_receipt',
@@ -110,7 +110,7 @@ export async function handleWebSocketUpgrade(
             'DELETE FROM pending_messages WHERE id = ? AND recipient_id = ?'
           ).bind(data.messageId, user.userId).run();
 
-          // Notify sender of delivery receipt
+          // Notify sender of delivery receipt (Double Gray Check)
           const senderId = data.senderId;
           if (senderId) {
             const senderSocket = ConnectionManager.get(senderId);
@@ -138,6 +138,114 @@ export async function handleWebSocketUpgrade(
                   event: 'delivery_receipt',
                   conversationId: data.conversationId,
                   status: 'read',
+                })
+              );
+            }
+          }
+          break;
+        }
+
+        case 'typing_start': {
+          if (data.recipientId) {
+            const recipientSocket = ConnectionManager.get(data.recipientId);
+            if (recipientSocket && recipientSocket.readyState === WebSocket.OPEN) {
+              recipientSocket.send(
+                JSON.stringify({
+                  event: 'typing_start',
+                  conversationId: data.conversationId,
+                  senderId: user.userId,
+                })
+              );
+            }
+          }
+          break;
+        }
+
+        case 'typing_stop': {
+          if (data.recipientId) {
+            const recipientSocket = ConnectionManager.get(data.recipientId);
+            if (recipientSocket && recipientSocket.readyState === WebSocket.OPEN) {
+              recipientSocket.send(
+                JSON.stringify({
+                  event: 'typing_stop',
+                  conversationId: data.conversationId,
+                  senderId: user.userId,
+                })
+              );
+            }
+          }
+          break;
+        }
+
+        case 'presence_query': {
+          if (data.targetUserId) {
+            const target = await env.DB.prepare(
+              'SELECT is_online, last_seen_at, show_last_seen FROM users WHERE id = ?'
+            ).bind(data.targetUserId).first();
+
+            if (target) {
+              const isOnline = target.is_online === 1;
+              const showLastSeen = target.show_last_seen === 1;
+              server.send(
+                JSON.stringify({
+                  event: 'user_presence',
+                  userId: data.targetUserId,
+                  isOnline,
+                  lastSeenAt: showLastSeen ? target.last_seen_at : null,
+                })
+              );
+            }
+          }
+          break;
+        }
+
+        case 'message_reaction': {
+          if (data.recipientId) {
+            const recipientSocket = ConnectionManager.get(data.recipientId);
+            if (recipientSocket && recipientSocket.readyState === WebSocket.OPEN) {
+              recipientSocket.send(
+                JSON.stringify({
+                  event: 'message_reaction',
+                  messageId: data.messageId,
+                  conversationId: data.conversationId,
+                  userId: user.userId,
+                  emoji: data.emoji,
+                  action: data.action || 'add',
+                })
+              );
+            }
+          }
+          break;
+        }
+
+        case 'edit_message': {
+          if (data.recipientId) {
+            const recipientSocket = ConnectionManager.get(data.recipientId);
+            if (recipientSocket && recipientSocket.readyState === WebSocket.OPEN) {
+              recipientSocket.send(
+                JSON.stringify({
+                  event: 'message_edited',
+                  messageId: data.messageId,
+                  conversationId: data.conversationId,
+                  content: data.content,
+                  editedAt: data.editedAt || new Date().toISOString(),
+                })
+              );
+            }
+          }
+          break;
+        }
+
+        case 'delete_message': {
+          if (data.recipientId) {
+            const recipientSocket = ConnectionManager.get(data.recipientId);
+            if (recipientSocket && recipientSocket.readyState === WebSocket.OPEN) {
+              recipientSocket.send(
+                JSON.stringify({
+                  event: 'message_deleted',
+                  messageId: data.messageId,
+                  conversationId: data.conversationId,
+                  deleteType: data.deleteType || 'for_everyone',
                 })
               );
             }

@@ -43,8 +43,28 @@ export default function ChatsScreen() {
       loadLocalConversations();
     });
 
+    const unsubReceipt = socketService.on('delivery_receipt', () => {
+      loadLocalConversations();
+    });
+
+    const unsubEdited = socketService.on('message_edited', () => {
+      loadLocalConversations();
+    });
+
+    const unsubDeleted = socketService.on('message_deleted', () => {
+      loadLocalConversations();
+    });
+
+    const unsubOutbox = socketService.on('outbox_flushed', () => {
+      loadLocalConversations();
+    });
+
     return () => {
       unsubMsg();
+      unsubReceipt();
+      unsubEdited();
+      unsubDeleted();
+      unsubOutbox();
     };
   }, []);
 
@@ -81,12 +101,30 @@ export default function ChatsScreen() {
     const convId = getDirectConversationId(currentUser.id, targetUser.id);
     
     const db = await getLocalDatabase();
-    await db.runAsync(
-      `INSERT OR REPLACE INTO local_conversations (
-        id, type, other_user_id, other_display_name, other_username, other_avatar_url, updated_at
-      ) VALUES (?, 'direct', ?, ?, ?, ?, datetime('now'))`,
-      [convId, targetUser.id, targetUser.displayName, targetUser.username, targetUser.avatarUrl]
+    
+    // Check if conversation exists already to avoid wiping existing metadata
+    const existing: any = await db.getFirstAsync(
+      `SELECT * FROM local_conversations WHERE id = ?`,
+      [convId]
     );
+
+    if (!existing) {
+      await db.runAsync(
+        `INSERT INTO local_conversations (
+          id, type, other_user_id, other_display_name, other_username, other_avatar_url, unread_count, updated_at
+        ) VALUES (?, 'direct', ?, ?, ?, ?, 0, datetime('now'))`,
+        [convId, targetUser.id, targetUser.displayName, targetUser.username, targetUser.avatarUrl]
+      );
+    } else {
+      await db.runAsync(
+        `UPDATE local_conversations SET
+          other_display_name = ?,
+          other_username = ?,
+          other_avatar_url = ?
+        WHERE id = ?`,
+        [targetUser.displayName, targetUser.username, targetUser.avatarUrl, convId]
+      );
+    }
 
     await loadLocalConversations();
     router.push({
@@ -98,6 +136,16 @@ export default function ChatsScreen() {
       },
     });
   };
+
+  const filteredConversations = conversations.filter((c) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      (c.other_display_name && c.other_display_name.toLowerCase().includes(q)) ||
+      (c.other_username && c.other_username.toLowerCase().includes(q)) ||
+      (c.last_message_preview && c.last_message_preview.toLowerCase().includes(q))
+    );
+  });
 
   return (
     <View style={styles.container}>
@@ -112,7 +160,7 @@ export default function ChatsScreen() {
         />
       </View>
 
-      {conversations.length === 0 ? (
+      {filteredConversations.length === 0 ? (
         <View style={styles.emptyContainer}>
           <MessageSquare size={64} color="#CBD5E1" />
           <Text style={styles.emptyTitle}>No messages yet</Text>
@@ -122,7 +170,7 @@ export default function ChatsScreen() {
         </View>
       ) : (
         <FlatList
-          data={conversations}
+          data={filteredConversations}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <TouchableOpacity
@@ -144,11 +192,12 @@ export default function ChatsScreen() {
                   {(item.other_display_name || 'U')[0].toUpperCase()}
                 </Text>
               </View>
+
               <View style={styles.chatDetails}>
                 <View style={styles.chatHeader}>
                   <Text style={styles.chatName}>{item.other_display_name}</Text>
                   {item.last_message_at && (
-                    <Text style={styles.chatTime}>
+                    <Text style={[styles.chatTime, item.unread_count > 0 && styles.chatTimeActive]}>
                       {new Date(item.last_message_at).toLocaleTimeString([], {
                         hour: '2-digit',
                         minute: '2-digit',
@@ -156,9 +205,23 @@ export default function ChatsScreen() {
                     </Text>
                   )}
                 </View>
-                <Text style={styles.lastMessage} numberOfLines={1}>
-                  {item.last_message_preview || 'Tap to start conversation'}
-                </Text>
+
+                <View style={styles.chatFooterRow}>
+                  <Text
+                    style={[styles.lastMessage, item.unread_count > 0 && styles.lastMessageUnread]}
+                    numberOfLines={1}
+                  >
+                    {item.last_message_preview || 'Tap to start conversation'}
+                  </Text>
+
+                  {item.unread_count > 0 && (
+                    <View style={styles.unreadBadge}>
+                      <Text style={styles.unreadBadgeText}>
+                        {item.unread_count > 99 ? '99+' : item.unread_count}
+                      </Text>
+                    </View>
+                  )}
+                </View>
               </View>
             </TouchableOpacity>
           )}
@@ -302,9 +365,38 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.light.textSecondary,
   },
+  chatTimeActive: {
+    color: Colors.light.primary,
+    fontWeight: '600',
+  },
+  chatFooterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   lastMessage: {
+    flex: 1,
     fontSize: 14,
     color: Colors.light.textSecondary,
+    marginRight: 8,
+  },
+  lastMessageUnread: {
+    color: Colors.light.textPrimary,
+    fontWeight: '600',
+  },
+  unreadBadge: {
+    backgroundColor: '#25D366',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 5,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  unreadBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: 'bold',
   },
   fab: {
     position: 'absolute',

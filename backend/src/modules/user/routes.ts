@@ -1,7 +1,10 @@
 import { Hono } from 'hono';
 import { authMiddleware } from '../../middleware/auth.js';
 
-const user = new Hono<{ Bindings: { DB: D1Database } }>();
+const user = new Hono<{
+  Bindings: { DB: D1Database };
+  Variables: { user: { userId: string; username?: string } };
+}>();
 user.use('*', authMiddleware);
 
 user.get('/me', async (c) => {

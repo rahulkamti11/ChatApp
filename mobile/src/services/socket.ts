@@ -1,4 +1,11 @@
-import { insertLocalMessage, updateMessageStatus, updateConversationMessagesStatus } from '../db/queries/messages';
+import {
+  insertLocalMessage,
+  updateMessageStatus,
+  updateConversationMessagesStatus,
+  editLocalMessage,
+  deleteLocalMessage,
+  updateMessageReaction,
+} from '../db/queries/messages';
 import { flushOutbox } from './outbox';
 
 // Production Cloudflare Workers WebSocket endpoint
@@ -89,6 +96,7 @@ class SocketService {
           replyToId: data.replyToId,
           status: 'delivered',
           createdAt: data.createdAt || new Date().toISOString(),
+          isIncoming: true,
           otherUserId: data.senderId,
         });
 
@@ -107,6 +115,24 @@ class SocketService {
         }
         if (data.conversationId && data.status === 'read') {
           await updateConversationMessagesStatus(data.conversationId, 'read');
+        }
+        break;
+
+      case 'message_reaction':
+        if (data.messageId && data.userId) {
+          await updateMessageReaction(data.messageId, data.userId, data.emoji, data.action || 'add');
+        }
+        break;
+
+      case 'message_edited':
+        if (data.messageId && data.content) {
+          await editLocalMessage(data.messageId, data.content, data.editedAt || new Date().toISOString());
+        }
+        break;
+
+      case 'message_deleted':
+        if (data.messageId) {
+          await deleteLocalMessage(data.messageId, data.deleteType === 'for_everyone');
         }
         break;
     }
