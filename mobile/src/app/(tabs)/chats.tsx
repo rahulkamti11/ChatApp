@@ -8,6 +8,7 @@ import {
   TextInput,
   Modal,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Search, Plus, MessageSquare } from 'lucide-react-native';
@@ -29,6 +30,7 @@ export default function ChatsScreen() {
   const [searchUserInput, setSearchUserInput] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -68,16 +70,60 @@ export default function ChatsScreen() {
     };
   }, []);
 
+  // Resilient & self-healing conversation loader
   const loadLocalConversations = async () => {
     try {
       const db = await getLocalDatabase();
-      const rows = await db.getAllAsync(
-        'SELECT * FROM local_conversations ORDER BY last_message_at DESC'
+      let rows: any[] = await db.getAllAsync(
+        'SELECT * FROM local_conversations ORDER BY COALESCE(last_message_at, updated_at, "") DESC'
       );
+
+      // Self-healing: Check if any orphaned message conversations exist in local_messages
+      try {
+        const messageThreads: any[] = await db.getAllAsync(
+          'SELECT conversation_id, MAX(created_at) as max_at, content as latest_content FROM local_messages GROUP BY conversation_id'
+        );
+
+        if (messageThreads && messageThreads.length > 0) {
+          const existingIds = new Set(rows.map((r) => r.id));
+          let healed = false;
+
+          for (const thread of messageThreads) {
+            if (!existingIds.has(thread.conversation_id)) {
+              // Extract target user ID from conversationId conv_userA_userB
+              const otherId = currentUser
+                ? thread.conversation_id.replace('conv_', '').split('_').find((p: string) => p !== currentUser.id)
+                : 'Contact';
+
+              await db.runAsync(
+                `INSERT OR IGNORE INTO local_conversations (
+                  id, type, other_user_id, other_display_name, last_message_preview, last_message_at, unread_count, updated_at
+                ) VALUES (?, 'direct', ?, ?, ?, ?, 0, datetime('now'))`,
+                [thread.conversation_id, otherId, otherId || 'Chat', thread.latest_content, thread.max_at]
+              );
+              healed = true;
+            }
+          }
+
+          if (healed) {
+            rows = await db.getAllAsync(
+              'SELECT * FROM local_conversations ORDER BY COALESCE(last_message_at, updated_at, "") DESC'
+            );
+          }
+        }
+      } catch (selfHealErr) {}
+
       setConversations(rows);
     } catch (err) {
       console.error('[SQLite] Failed to load local conversations:', err);
+    } finally {
+      setRefreshing(false);
     }
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadLocalConversations();
   };
 
   const handleSearchUser = async () => {
@@ -172,6 +218,14 @@ export default function ChatsScreen() {
         <FlatList
           data={filteredConversations}
           keyExtractor={(item) => item.id}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[Colors.light.primary]}
+              tintColor={Colors.light.primary}
+            />
+          }
           renderItem={({ item }) => (
             <TouchableOpacity
               style={styles.chatRow}

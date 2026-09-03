@@ -201,18 +201,24 @@ export async function handleWebSocketUpgrade(
 
         case 'message_reaction': {
           if (data.recipientId) {
+            const payloadString = JSON.stringify({
+              event: 'message_reaction',
+              messageId: data.messageId,
+              conversationId: data.conversationId,
+              userId: user.userId,
+              emoji: data.emoji,
+              action: data.action || 'add',
+            });
+
             const recipientSocket = ConnectionManager.get(data.recipientId);
             if (recipientSocket && recipientSocket.readyState === WebSocket.OPEN) {
-              recipientSocket.send(
-                JSON.stringify({
-                  event: 'message_reaction',
-                  messageId: data.messageId,
-                  conversationId: data.conversationId,
-                  userId: user.userId,
-                  emoji: data.emoji,
-                  action: data.action || 'add',
-                })
-              );
+              recipientSocket.send(payloadString);
+            } else {
+              const eventId = 'evt_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+              await env.DB.prepare(`
+                INSERT INTO pending_messages (id, conversation_id, sender_id, recipient_id, sequence, encrypted_payload)
+                VALUES (?, ?, ?, ?, 0, ?)
+              `).bind(eventId, data.conversationId, user.userId, data.recipientId, payloadString).run();
             }
           }
           break;
@@ -220,17 +226,23 @@ export async function handleWebSocketUpgrade(
 
         case 'edit_message': {
           if (data.recipientId) {
+            const payloadString = JSON.stringify({
+              event: 'message_edited',
+              messageId: data.messageId,
+              conversationId: data.conversationId,
+              content: data.content,
+              editedAt: data.editedAt || new Date().toISOString(),
+            });
+
             const recipientSocket = ConnectionManager.get(data.recipientId);
             if (recipientSocket && recipientSocket.readyState === WebSocket.OPEN) {
-              recipientSocket.send(
-                JSON.stringify({
-                  event: 'message_edited',
-                  messageId: data.messageId,
-                  conversationId: data.conversationId,
-                  content: data.content,
-                  editedAt: data.editedAt || new Date().toISOString(),
-                })
-              );
+              recipientSocket.send(payloadString);
+            } else {
+              const eventId = 'evt_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+              await env.DB.prepare(`
+                INSERT INTO pending_messages (id, conversation_id, sender_id, recipient_id, sequence, encrypted_payload)
+                VALUES (?, ?, ?, ?, 0, ?)
+              `).bind(eventId, data.conversationId, user.userId, data.recipientId, payloadString).run();
             }
           }
           break;
@@ -238,16 +250,22 @@ export async function handleWebSocketUpgrade(
 
         case 'delete_message': {
           if (data.recipientId) {
+            const payloadString = JSON.stringify({
+              event: 'message_deleted',
+              messageId: data.messageId,
+              conversationId: data.conversationId,
+              deleteType: data.deleteType || 'for_everyone',
+            });
+
             const recipientSocket = ConnectionManager.get(data.recipientId);
             if (recipientSocket && recipientSocket.readyState === WebSocket.OPEN) {
-              recipientSocket.send(
-                JSON.stringify({
-                  event: 'message_deleted',
-                  messageId: data.messageId,
-                  conversationId: data.conversationId,
-                  deleteType: data.deleteType || 'for_everyone',
-                })
-              );
+              recipientSocket.send(payloadString);
+            } else {
+              const eventId = 'evt_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+              await env.DB.prepare(`
+                INSERT INTO pending_messages (id, conversation_id, sender_id, recipient_id, sequence, encrypted_payload)
+                VALUES (?, ?, ?, ?, 0, ?)
+              `).bind(eventId, data.conversationId, user.userId, data.recipientId, payloadString).run();
             }
           }
           break;

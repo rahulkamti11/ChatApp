@@ -117,18 +117,24 @@ messages.post('/reaction', async (c) => {
       return c.json({ error: 'Missing required parameters' }, 400);
     }
 
+    const payloadString = JSON.stringify({
+      event: 'message_reaction',
+      messageId,
+      conversationId,
+      userId: authUser.userId,
+      emoji,
+      action: action || 'add',
+    });
+
     const recipientSocket = ConnectionManager.get(recipientId);
     if (recipientSocket && recipientSocket.readyState === WebSocket.OPEN) {
-      recipientSocket.send(
-        JSON.stringify({
-          event: 'message_reaction',
-          messageId,
-          conversationId,
-          userId: authUser.userId,
-          emoji,
-          action: action || 'add',
-        })
-      );
+      recipientSocket.send(payloadString);
+    } else {
+      const eventId = 'evt_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+      await c.env.DB.prepare(`
+        INSERT INTO pending_messages (id, conversation_id, sender_id, recipient_id, sequence, encrypted_payload)
+        VALUES (?, ?, ?, ?, 0, ?)
+      `).bind(eventId, conversationId, authUser.userId, recipientId, payloadString).run();
     }
 
     return c.json({ success: true, messageId, emoji, action });
@@ -147,17 +153,23 @@ messages.post('/edit', async (c) => {
     }
 
     const editedAt = new Date().toISOString();
+    const payloadString = JSON.stringify({
+      event: 'message_edited',
+      messageId,
+      conversationId,
+      content,
+      editedAt,
+    });
+
     const recipientSocket = ConnectionManager.get(recipientId);
     if (recipientSocket && recipientSocket.readyState === WebSocket.OPEN) {
-      recipientSocket.send(
-        JSON.stringify({
-          event: 'message_edited',
-          messageId,
-          conversationId,
-          content,
-          editedAt,
-        })
-      );
+      recipientSocket.send(payloadString);
+    } else {
+      const eventId = 'evt_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+      await c.env.DB.prepare(`
+        INSERT INTO pending_messages (id, conversation_id, sender_id, recipient_id, sequence, encrypted_payload)
+        VALUES (?, ?, ?, ?, 0, ?)
+      `).bind(eventId, conversationId, authUser.userId, recipientId, payloadString).run();
     }
 
     return c.json({ success: true, messageId, content, editedAt });
@@ -175,16 +187,22 @@ messages.post('/delete', async (c) => {
       return c.json({ error: 'Missing required parameters' }, 400);
     }
 
+    const payloadString = JSON.stringify({
+      event: 'message_deleted',
+      messageId,
+      conversationId,
+      deleteType: deleteType || 'for_everyone',
+    });
+
     const recipientSocket = ConnectionManager.get(recipientId);
     if (recipientSocket && recipientSocket.readyState === WebSocket.OPEN) {
-      recipientSocket.send(
-        JSON.stringify({
-          event: 'message_deleted',
-          messageId,
-          conversationId,
-          deleteType: deleteType || 'for_everyone',
-        })
-      );
+      recipientSocket.send(payloadString);
+    } else {
+      const eventId = 'evt_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+      await c.env.DB.prepare(`
+        INSERT INTO pending_messages (id, conversation_id, sender_id, recipient_id, sequence, encrypted_payload)
+        VALUES (?, ?, ?, ?, 0, ?)
+      `).bind(eventId, conversationId, authUser.userId, recipientId, payloadString).run();
     }
 
     return c.json({ success: true, messageId, deleteType: deleteType || 'for_everyone' });

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   TouchableWithoutFeedback,
   StyleSheet,
   Clipboard,
+  ScrollView,
 } from 'react-native';
 import {
   CornerUpLeft,
@@ -15,11 +16,21 @@ import {
   StarOff,
   Pencil,
   Trash2,
-  Smile,
+  Plus,
+  X,
 } from 'lucide-react-native';
 import { Colors } from '../../theme/colors';
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
+const ALL_EMOJIS = [
+  '👍', '❤️', '😂', '😮', '😢', '🙏',
+  '🔥', '🎉', '👏', '💯', '🤩', '😭',
+  '🥳', '😍', '✨', '🙌', '🤝', '😎',
+  '🚀', '💡', '💔', '🤔', '👀', '💪',
+  '👌', '😜', '🌟', '🥰', '🤗', '😴',
+  '🤮', '🤐', '😇', '🎯', '🍕', '⚡',
+];
 
 interface MessageActionModalProps {
   visible: boolean;
@@ -44,6 +55,8 @@ export function MessageActionModal({
   onEdit,
   onDelete,
 }: MessageActionModalProps) {
+  const [showFullPicker, setShowFullPicker] = useState(false);
+
   if (!message) return null;
 
   const isMe = message.sender_id === currentUserId;
@@ -59,109 +72,150 @@ export function MessageActionModal({
     onClose();
   };
 
+  const handleEmojiSelect = (emoji: string) => {
+    onReaction(message.id, emoji);
+    setShowFullPicker(false);
+    onClose();
+  };
+
+  const handleModalClose = () => {
+    setShowFullPicker(false);
+    onClose();
+  };
+
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableWithoutFeedback onPress={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleModalClose}>
+      <TouchableWithoutFeedback onPress={handleModalClose}>
         <View style={styles.overlay}>
           <TouchableWithoutFeedback>
             <View style={styles.sheetContainer}>
-              {/* 1. Quick Emoji Reaction Dock */}
+              {/* 1. Emoji Reaction Dock (or Full Picker) */}
               {!isDeleted && (
-                <View style={styles.reactionDock}>
-                  {QUICK_EMOJIS.map((emoji) => (
+                showFullPicker ? (
+                  <View style={styles.fullPickerContainer}>
+                    <View style={styles.pickerHeader}>
+                      <Text style={styles.pickerTitle}>React with Emoji</Text>
+                      <TouchableOpacity onPress={() => setShowFullPicker(false)}>
+                        <X size={20} color={Colors.light.textSecondary} />
+                      </TouchableOpacity>
+                    </View>
+                    <ScrollView contentContainerStyle={styles.pickerGrid}>
+                      {ALL_EMOJIS.map((emoji) => (
+                        <TouchableOpacity
+                          key={emoji}
+                          style={styles.pickerEmojiBtn}
+                          activeOpacity={0.6}
+                          onPress={() => handleEmojiSelect(emoji)}
+                        >
+                          <Text style={styles.pickerEmojiText}>{emoji}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                ) : (
+                  <View style={styles.reactionDock}>
+                    {QUICK_EMOJIS.map((emoji) => (
+                      <TouchableOpacity
+                        key={emoji}
+                        style={styles.reactionBtn}
+                        activeOpacity={0.6}
+                        onPress={() => handleEmojiSelect(emoji)}
+                      >
+                        <Text style={styles.reactionEmoji}>{emoji}</Text>
+                      </TouchableOpacity>
+                    ))}
+                    {/* '+' Icon for full picker */}
                     <TouchableOpacity
-                      key={emoji}
-                      style={styles.reactionBtn}
+                      style={styles.plusBtn}
                       activeOpacity={0.6}
-                      onPress={() => {
-                        onReaction(message.id, emoji);
-                        onClose();
-                      }}
+                      onPress={() => setShowFullPicker(true)}
                     >
-                      <Text style={styles.reactionEmoji}>{emoji}</Text>
+                      <Plus size={20} color={Colors.light.textSecondary} />
                     </TouchableOpacity>
-                  ))}
-                </View>
+                  </View>
+                )
               )}
 
               {/* 2. Action Menu Items */}
-              <View style={styles.menuContainer}>
-                {!isDeleted && (
+              {!showFullPicker && (
+                <View style={styles.menuContainer}>
+                  {!isDeleted && (
+                    <TouchableOpacity
+                      style={styles.menuItem}
+                      onPress={() => {
+                        onReply(message);
+                        handleModalClose();
+                      }}
+                    >
+                      <CornerUpLeft size={20} color={Colors.light.textPrimary} />
+                      <Text style={styles.menuText}>Reply</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {message.content && !isDeleted && (
+                    <TouchableOpacity style={styles.menuItem} onPress={handleCopy}>
+                      <Copy size={20} color={Colors.light.textPrimary} />
+                      <Text style={styles.menuText}>Copy Text</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {!isDeleted && (
+                    <TouchableOpacity
+                      style={styles.menuItem}
+                      onPress={() => {
+                        onToggleStar(message.id, !isStarred);
+                        handleModalClose();
+                      }}
+                    >
+                      {isStarred ? (
+                        <StarOff size={20} color="#F59E0B" />
+                      ) : (
+                        <Star size={20} color={Colors.light.textPrimary} />
+                      )}
+                      <Text style={styles.menuText}>{isStarred ? 'Unstar' : 'Star'}</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {canEdit && (
+                    <TouchableOpacity
+                      style={styles.menuItem}
+                      onPress={() => {
+                        onEdit(message);
+                        handleModalClose();
+                      }}
+                    >
+                      <Pencil size={20} color={Colors.light.primary} />
+                      <Text style={[styles.menuText, { color: Colors.light.primary }]}>Edit Message</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {isMe && !isDeleted && (
+                    <TouchableOpacity
+                      style={styles.menuItem}
+                      onPress={() => {
+                        onDelete(message.id, true);
+                        handleModalClose();
+                      }}
+                    >
+                      <Trash2 size={20} color={Colors.light.error} />
+                      <Text style={[styles.menuText, { color: Colors.light.error }]}>
+                        Delete for Everyone
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+
                   <TouchableOpacity
-                    style={styles.menuItem}
+                    style={[styles.menuItem, { borderBottomWidth: 0 }]}
                     onPress={() => {
-                      onReply(message);
-                      onClose();
+                      onDelete(message.id, false);
+                      handleModalClose();
                     }}
                   >
-                    <CornerUpLeft size={20} color={Colors.light.textPrimary} />
-                    <Text style={styles.menuText}>Reply</Text>
+                    <Trash2 size={20} color={Colors.light.textSecondary} />
+                    <Text style={styles.menuText}>Delete for Me</Text>
                   </TouchableOpacity>
-                )}
-
-                {message.content && !isDeleted && (
-                  <TouchableOpacity style={styles.menuItem} onPress={handleCopy}>
-                    <Copy size={20} color={Colors.light.textPrimary} />
-                    <Text style={styles.menuText}>Copy Text</Text>
-                  </TouchableOpacity>
-                )}
-
-                {!isDeleted && (
-                  <TouchableOpacity
-                    style={styles.menuItem}
-                    onPress={() => {
-                      onToggleStar(message.id, !isStarred);
-                      onClose();
-                    }}
-                  >
-                    {isStarred ? (
-                      <StarOff size={20} color="#F59E0B" />
-                    ) : (
-                      <Star size={20} color={Colors.light.textPrimary} />
-                    )}
-                    <Text style={styles.menuText}>{isStarred ? 'Unstar' : 'Star'}</Text>
-                  </TouchableOpacity>
-                )}
-
-                {canEdit && (
-                  <TouchableOpacity
-                    style={styles.menuItem}
-                    onPress={() => {
-                      onEdit(message);
-                      onClose();
-                    }}
-                  >
-                    <Pencil size={20} color={Colors.light.primary} />
-                    <Text style={[styles.menuText, { color: Colors.light.primary }]}>Edit Message</Text>
-                  </TouchableOpacity>
-                )}
-
-                {isMe && !isDeleted && (
-                  <TouchableOpacity
-                    style={styles.menuItem}
-                    onPress={() => {
-                      onDelete(message.id, true);
-                      onClose();
-                    }}
-                  >
-                    <Trash2 size={20} color={Colors.light.error} />
-                    <Text style={[styles.menuText, { color: Colors.light.error }]}>
-                      Delete for Everyone
-                    </Text>
-                  </TouchableOpacity>
-                )}
-
-                <TouchableOpacity
-                  style={[styles.menuItem, { borderBottomWidth: 0 }]}
-                  onPress={() => {
-                    onDelete(message.id, false);
-                    onClose();
-                  }}
-                >
-                  <Trash2 size={20} color={Colors.light.textSecondary} />
-                  <Text style={styles.menuText}>Delete for Me</Text>
-                </TouchableOpacity>
-              </View>
+                </View>
+              )}
             </View>
           </TouchableWithoutFeedback>
         </View>
@@ -186,17 +240,58 @@ const styles = StyleSheet.create({
   },
   reactionDock: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-around',
     backgroundColor: '#F0F2F5',
     borderRadius: 30,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
     marginBottom: 16,
   },
   reactionBtn: {
     padding: 6,
   },
   reactionEmoji: {
+    fontSize: 26,
+  },
+  plusBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#E2E8F0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 4,
+  },
+  fullPickerContainer: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 16,
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  pickerTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: Colors.light.textPrimary,
+  },
+  pickerGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  pickerEmojiBtn: {
+    width: '16.66%',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  pickerEmojiText: {
     fontSize: 26,
   },
   menuContainer: {
