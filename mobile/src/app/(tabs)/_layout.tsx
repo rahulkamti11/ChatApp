@@ -1,7 +1,7 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MessageSquare, Phone, Settings } from 'lucide-react-native';
+import { MessageSquare, Phone, User } from 'lucide-react-native';
 import { Colors } from '../../theme/colors';
 
 export default function TabsLayout() {
@@ -45,13 +45,14 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="settings"
+        name="profile"
         options={{
-          title: 'Settings',
-          tabBarLabel: 'Settings',
-          tabBarIcon: ({ color, size }: { color: string; size: number }) => <Settings color={color} size={size} />,
+          title: 'Profile',
+          tabBarLabel: 'Profile',
+          tabBarIcon: ({ color, size }: { color: string; size: number }) => <User color={color} size={size} />,
         }}
       />
     </Tabs>
   );
 }
+

@@ -12,7 +12,19 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Send, Check, CheckCheck, Clock, Star, X } from 'lucide-react-native';
+import {
+  Send,
+  Check,
+  CheckCheck,
+  Clock,
+  Star,
+  X,
+  Paperclip,
+  Image as ImageIcon,
+  FileText,
+  Music,
+  Bookmark,
+} from 'lucide-react-native';
 import {
   getMessagesForConversation,
   insertLocalMessage,
@@ -32,6 +44,7 @@ import { Colors } from '../../theme/colors';
 import { ReplyPreviewBar } from '../../components/chat/ReplyPreviewBar';
 import { MessageActionModal } from '../../components/chat/MessageActionModal';
 import { SwipeableMessageBubble } from '../../components/chat/SwipeableMessageBubble';
+import { MediaAttachmentSheet } from '../../components/chat/MediaAttachmentSheet';
 
 function generateMessageId(): string {
   return 'msg_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 10);
@@ -50,9 +63,11 @@ export default function ChatRoomScreen() {
   const currentUser = useAuthStore((state) => state.user);
   const token = useAuthStore((state) => state.token);
 
+  const isSelfChat = conversationId?.startsWith('conv_self_') || paramOtherUserId === currentUser?.id;
+
   // Fallback otherUserId resolution if route param is missing
-  const [resolvedOtherUserId, setResolvedOtherUserId] = useState<string>(paramOtherUserId || '');
-  const [resolvedDisplayName, setResolvedDisplayName] = useState<string>(paramOtherDisplayName || 'Chat');
+  const [resolvedOtherUserId, setResolvedOtherUserId] = useState<string>(isSelfChat ? (currentUser?.id || '') : (paramOtherUserId || ''));
+  const [resolvedDisplayName, setResolvedDisplayName] = useState<string>(isSelfChat ? 'Saved Messages' : (paramOtherDisplayName || 'Chat'));
 
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState('');
@@ -60,24 +75,29 @@ export default function ChatRoomScreen() {
   const [isTyping, setIsTyping] = useState(false);
   const [presenceText, setPresenceText] = useState<string>('');
   
-  // Phase 3 Interaction States
+  // Interaction States
   const [replyMessage, setReplyMessage] = useState<any | null>(null);
   const [editingMessage, setEditingMessage] = useState<any | null>(null);
   const [selectedActionMessage, setSelectedActionMessage] = useState<any | null>(null);
   const [isActionModalVisible, setIsActionModalVisible] = useState(false);
+  const [isAttachmentSheetVisible, setIsAttachmentSheetVisible] = useState(false);
 
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<any>(null);
   const lastTypingSentRef = useRef<number>(0);
 
-  // Resolve otherUserId and otherDisplayName reliably from conversationId or SQLite
   useEffect(() => {
     async function resolveContact() {
+      if (isSelfChat) {
+        setResolvedOtherUserId(currentUser?.id || '');
+        setResolvedDisplayName('Saved Messages');
+        return;
+      }
+
       let targetUserId = paramOtherUserId;
       let targetName = paramOtherDisplayName;
 
       if (!targetUserId && conversationId && currentUser) {
-        // Extract from conv_userIdA_userIdB
         const parts = conversationId.replace('conv_', '').split('_');
         targetUserId = parts.find((p) => p !== currentUser.id) || '';
       }
@@ -105,7 +125,7 @@ export default function ChatRoomScreen() {
     }
 
     resolveContact();
-  }, [conversationId, paramOtherUserId, paramOtherDisplayName, currentUser]);
+  }, [conversationId, paramOtherUserId, paramOtherDisplayName, currentUser, isSelfChat]);
 
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', () => setIsKeyboardVisible(true));
@@ -119,7 +139,9 @@ export default function ChatRoomScreen() {
   // Update navigation header title and dynamic subtitle
   useEffect(() => {
     let subtitle = '';
-    if (isTyping) {
+    if (isSelfChat) {
+      subtitle = 'Notes, links & bookmarks';
+    } else if (isTyping) {
       subtitle = 'typing...';
     } else if (presenceText) {
       subtitle = presenceText;
@@ -128,9 +150,12 @@ export default function ChatRoomScreen() {
     navigation.setOptions({
       headerTitle: () => (
         <View style={styles.headerTitleContainer}>
-          <Text style={styles.headerTitleText} numberOfLines={1}>
-            {resolvedDisplayName || 'Chat'}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            {isSelfChat && <Bookmark size={16} color="#FFFFFF" style={{ marginRight: 6 }} />}
+            <Text style={styles.headerTitleText} numberOfLines={1}>
+              {resolvedDisplayName || 'Chat'}
+            </Text>
+          </View>
           {subtitle ? (
             <Text
               style={[
@@ -145,15 +170,15 @@ export default function ChatRoomScreen() {
         </View>
       ),
     });
-  }, [resolvedDisplayName, isTyping, presenceText]);
+  }, [resolvedDisplayName, isTyping, presenceText, isSelfChat]);
 
   const emitReadReceipt = useCallback(() => {
     if (!token || !conversationId) return;
 
-    // 1. Reset local unread counter
     resetConversationUnread(conversationId);
 
-    // 2. Emit WS read_receipt to sender
+    if (isSelfChat) return;
+
     const targetUserId = resolvedOtherUserId || paramOtherUserId;
     if (targetUserId) {
       socketService.send({
@@ -162,7 +187,6 @@ export default function ChatRoomScreen() {
         senderId: targetUserId,
       });
 
-      // REST fallback
       apiRequest('/api/messages/read', {
         method: 'POST',
         body: JSON.stringify({
@@ -171,7 +195,7 @@ export default function ChatRoomScreen() {
         }),
       }, token).catch(() => {});
     }
-  }, [conversationId, resolvedOtherUserId, paramOtherUserId, token]);
+  }, [conversationId, resolvedOtherUserId, paramOtherUserId, token, isSelfChat]);
 
   const loadMessages = async () => {
     if (!conversationId) return;
@@ -182,30 +206,23 @@ export default function ChatRoomScreen() {
   useEffect(() => {
     loadMessages();
 
-    // 1. Ensure WebSocket connection is active
     if (token && !socketService.isConnected()) {
       socketService.connect(token);
     }
 
-    // 2. Flush outbox
     flushOutbox(token);
-
-    // 3. Mark messages as read immediately on entry
     emitReadReceipt();
 
-    // 4. Query presence
     const targetUserId = resolvedOtherUserId || paramOtherUserId;
-    if (targetUserId) {
+    if (targetUserId && !isSelfChat) {
       socketService.send({
         event: 'presence_query',
         targetUserId,
       });
     }
 
-    // 5. Initial sync
     syncMissedMessages();
 
-    // 6. Background periodic poll while active
     const pollTimer = setInterval(() => {
       syncMissedMessages();
       flushOutbox(token);
@@ -292,9 +309,8 @@ export default function ChatRoomScreen() {
       unsubscribeOutbox();
       unsubscribeConn();
     };
-  }, [conversationId, resolvedOtherUserId, paramOtherUserId, token, emitReadReceipt]);
+  }, [conversationId, resolvedOtherUserId, paramOtherUserId, token, emitReadReceipt, isSelfChat]);
 
-  // Multi-event synchronization dispatcher
   const syncMissedMessages = async () => {
     if (!token || !conversationId) return;
     try {
@@ -312,7 +328,6 @@ export default function ChatRoomScreen() {
           } else if (item.event === 'message_deleted') {
             await deleteLocalMessage(item.messageId, item.deleteType === 'for_everyone');
           } else {
-            // Standard new message
             await insertLocalMessage({
               id: item.id,
               conversationId: item.conversationId,
@@ -328,7 +343,6 @@ export default function ChatRoomScreen() {
             });
           }
 
-          // Send ACK to remove processed item from pending_messages
           socketService.send({
             event: 'ack',
             messageId: item.id || item.messageId,
@@ -339,14 +353,13 @@ export default function ChatRoomScreen() {
         emitReadReceipt();
         loadMessages();
       }
-    } catch (e) {
-      // Silent sync catch
-    }
+    } catch (e) {}
   };
 
-  // Debounced Typing Dispatcher
   const handleInputChange = (text: string) => {
     setInputText(text);
+
+    if (isSelfChat) return;
 
     const targetUserId = resolvedOtherUserId || paramOtherUserId;
     if (!targetUserId || !conversationId) return;
@@ -374,38 +387,44 @@ export default function ChatRoomScreen() {
     }, 1500);
   };
 
-  const handleSendMessage = async () => {
-    if (!inputText.trim() || !currentUser || !conversationId) return;
+  const handleSendMessage = async (customPayload?: { type: string; content: string; mediaUrl?: string }) => {
+    const textToSend = customPayload ? customPayload.content : inputText.trim();
+    const msgType = customPayload ? customPayload.type : 'text';
+    const mediaUrl = customPayload ? customPayload.mediaUrl : null;
 
-    const textToSend = inputText.trim();
+    if (!textToSend && !mediaUrl) return;
+    if (!currentUser || !conversationId) return;
+
     const targetUserId = resolvedOtherUserId || paramOtherUserId;
 
     // 1. IF EDITING EXISTING MESSAGE
-    if (editingMessage) {
+    if (editingMessage && !customPayload) {
       const editedAt = new Date().toISOString();
       await editLocalMessage(editingMessage.id, textToSend, editedAt);
       setInputText('');
       setEditingMessage(null);
       await loadMessages();
 
-      socketService.send({
-        event: 'edit_message',
-        messageId: editingMessage.id,
-        conversationId,
-        recipientId: targetUserId,
-        content: textToSend,
-        editedAt,
-      });
-
-      apiRequest('/api/messages/edit', {
-        method: 'POST',
-        body: JSON.stringify({
+      if (!isSelfChat && targetUserId) {
+        socketService.send({
+          event: 'edit_message',
           messageId: editingMessage.id,
           conversationId,
           recipientId: targetUserId,
           content: textToSend,
-        }),
-      }, token).catch(() => {});
+          editedAt,
+        });
+
+        apiRequest('/api/messages/edit', {
+          method: 'POST',
+          body: JSON.stringify({
+            messageId: editingMessage.id,
+            conversationId,
+            recipientId: targetUserId,
+            content: textToSend,
+          }),
+        }, token).catch(() => {});
+      }
       return;
     }
 
@@ -420,21 +439,24 @@ export default function ChatRoomScreen() {
       conversationId,
       senderId: currentUser.id,
       sequence: nextSequence,
-      type: 'text',
+      type: msgType,
       content: textToSend,
+      mediaUrl: mediaUrl || undefined,
       replyToId: replyTargetId,
-      status: 'pending' as const,
+      status: (isSelfChat ? 'read' : 'pending') as any,
       createdAt,
       isIncoming: false,
+      otherUserId: targetUserId,
+      otherDisplayName: resolvedDisplayName,
     };
 
-    // Save locally
     await insertLocalMessage(newMsg);
-    setInputText('');
+    if (!customPayload) setInputText('');
     setReplyMessage(null);
     await loadMessages();
 
-    // Stop typing broadcast
+    if (isSelfChat) return;
+
     if (targetUserId) {
       socketService.send({
         event: 'typing_stop',
@@ -443,14 +465,14 @@ export default function ChatRoomScreen() {
       });
     }
 
-    // Try WebSocket delivery
     const wsSent = socketService.send({
       event: 'send_message',
       id: messageId,
       conversationId,
       recipientId: targetUserId,
-      type: 'text',
+      type: msgType,
       content: textToSend,
+      mediaUrl,
       replyToId: replyTargetId,
     });
 
@@ -462,21 +484,53 @@ export default function ChatRoomScreen() {
             id: messageId,
             conversationId,
             recipientId: targetUserId,
-            type: 'text',
+            type: msgType,
             content: textToSend,
+            mediaUrl,
             replyToId: replyTargetId,
           }),
         }, token);
 
         await updateMessageStatus(messageId, res.status || 'sent');
         await loadMessages();
-      } catch (err) {
-        console.log('[Message API] Queued locally in SQLite');
-      }
+      } catch (err) {}
     }
   };
 
-  // Phase 3 Actions
+  // Attachment Sheet Handler
+  const handleSelectAttachment = (type: 'camera' | 'gallery' | 'audio' | 'files') => {
+    switch (type) {
+      case 'camera':
+        handleSendMessage({
+          type: 'image',
+          content: '📷 Photo captured with camera',
+          mediaUrl: 'https://images.unsplash.com/photo-1579202673506-ca3ce28943ef',
+        });
+        break;
+      case 'gallery':
+        handleSendMessage({
+          type: 'image',
+          content: '🖼️ Image from gallery',
+          mediaUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe',
+        });
+        break;
+      case 'audio':
+        handleSendMessage({
+          type: 'audio',
+          content: '🎵 Audio Voice Note (0:14)',
+          mediaUrl: 'audio_sample.aac',
+        });
+        break;
+      case 'files':
+        handleSendMessage({
+          type: 'document',
+          content: '📄 Project_Specifications.pdf (1.8 MB)',
+          mediaUrl: 'doc_sample.pdf',
+        });
+        break;
+    }
+  };
+
   const handleMessageLongPress = (item: any) => {
     setSelectedActionMessage(item);
     setIsActionModalVisible(true);
@@ -488,25 +542,27 @@ export default function ChatRoomScreen() {
     await updateMessageReaction(messageId, currentUser.id, emoji, 'add');
     await loadMessages();
 
-    socketService.send({
-      event: 'message_reaction',
-      messageId,
-      conversationId,
-      recipientId: targetUserId,
-      emoji,
-      action: 'add',
-    });
-
-    apiRequest('/api/messages/reaction', {
-      method: 'POST',
-      body: JSON.stringify({
+    if (!isSelfChat && targetUserId) {
+      socketService.send({
+        event: 'message_reaction',
         messageId,
         conversationId,
         recipientId: targetUserId,
         emoji,
         action: 'add',
-      }),
-    }, token).catch(() => {});
+      });
+
+      apiRequest('/api/messages/reaction', {
+        method: 'POST',
+        body: JSON.stringify({
+          messageId,
+          conversationId,
+          recipientId: targetUserId,
+          emoji,
+          action: 'add',
+        }),
+      }, token).catch(() => {});
+    }
   };
 
   const handleToggleReactionPill = async (messageId: string, emoji: string, userIds: string[]) => {
@@ -518,25 +574,27 @@ export default function ChatRoomScreen() {
     await updateMessageReaction(messageId, currentUser.id, emoji, action);
     await loadMessages();
 
-    socketService.send({
-      event: 'message_reaction',
-      messageId,
-      conversationId,
-      recipientId: targetUserId,
-      emoji,
-      action,
-    });
-
-    apiRequest('/api/messages/reaction', {
-      method: 'POST',
-      body: JSON.stringify({
+    if (!isSelfChat && targetUserId) {
+      socketService.send({
+        event: 'message_reaction',
         messageId,
         conversationId,
         recipientId: targetUserId,
         emoji,
         action,
-      }),
-    }, token).catch(() => {});
+      });
+
+      apiRequest('/api/messages/reaction', {
+        method: 'POST',
+        body: JSON.stringify({
+          messageId,
+          conversationId,
+          recipientId: targetUserId,
+          emoji,
+          action,
+        }),
+      }, token).catch(() => {});
+    }
   };
 
   const handleReply = (message: any) => {
@@ -564,7 +622,7 @@ export default function ChatRoomScreen() {
     await deleteLocalMessage(messageId, forEveryone);
     await loadMessages();
 
-    if (forEveryone) {
+    if (forEveryone && !isSelfChat && targetUserId) {
       socketService.send({
         event: 'delete_message',
         messageId,
@@ -593,6 +651,7 @@ export default function ChatRoomScreen() {
   };
 
   const renderStatusIcon = (status: string) => {
+    if (isSelfChat) return <CheckCheck size={16} color={Colors.light.checkBlue} />;
     switch (status) {
       case 'read':
         return <CheckCheck size={16} color={Colors.light.checkBlue} />;
@@ -628,6 +687,63 @@ export default function ChatRoomScreen() {
           </Text>
         </View>
       </TouchableOpacity>
+    );
+  };
+
+  const renderMessageContent = (item: any, isDeleted: boolean) => {
+    if (isDeleted) {
+      return <Text style={styles.deletedText}>🚫 This message was deleted</Text>;
+    }
+
+    if (item.type === 'image') {
+      return (
+        <View style={styles.mediaContainer}>
+          <View style={styles.mediaPlaceholder}>
+            <ImageIcon size={32} color={Colors.light.primary} />
+            <Text style={styles.mediaTag}>Image</Text>
+          </View>
+          {item.content ? <Text style={styles.mediaCaption}>{item.content}</Text> : null}
+        </View>
+      );
+    }
+
+    if (item.type === 'document') {
+      return (
+        <View style={styles.docContainer}>
+          <View style={styles.docIconBox}>
+            <FileText size={24} color="#FFFFFF" />
+          </View>
+          <View style={styles.docDetails}>
+            <Text style={styles.docTitle} numberOfLines={1}>{item.content || 'Document'}</Text>
+            <Text style={styles.docSub}>Tap to download / view</Text>
+          </View>
+        </View>
+      );
+    }
+
+    if (item.type === 'audio') {
+      return (
+        <View style={styles.audioContainer}>
+          <View style={styles.audioPlayBtn}>
+            <Music size={18} color="#FFFFFF" />
+          </View>
+          <View style={styles.audioWaveform}>
+            <View style={styles.waveformBar} />
+            <View style={[styles.waveformBar, { height: 16 }]} />
+            <View style={[styles.waveformBar, { height: 22 }]} />
+            <View style={[styles.waveformBar, { height: 12 }]} />
+            <View style={[styles.waveformBar, { height: 18 }]} />
+            <View style={[styles.waveformBar, { height: 8 }]} />
+          </View>
+          <Text style={styles.audioDuration}>0:14</Text>
+        </View>
+      );
+    }
+
+    return (
+      <Text style={[styles.messageText, item.sender_id === currentUser?.id ? styles.textSent : styles.textReceived]}>
+        {item.content}
+      </Text>
     );
   };
 
@@ -672,7 +788,7 @@ export default function ChatRoomScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
       <FlatList
@@ -700,15 +816,7 @@ export default function ChatRoomScreen() {
                   {item.reply_to_id && renderQuotedSnippet(item.reply_to_id)}
 
                   {/* 2. Message Content */}
-                  <Text
-                    style={[
-                      styles.messageText,
-                      isMe ? styles.textSent : styles.textReceived,
-                      isDeleted && styles.deletedText,
-                    ]}
-                  >
-                    {isDeleted ? '🚫 This message was deleted' : item.content}
-                  </Text>
+                  {renderMessageContent(item, isDeleted)}
 
                   {/* 3. Footer: Timestamp, Edited tag, Star, Status */}
                   <View style={styles.bubbleFooter}>
@@ -761,7 +869,7 @@ export default function ChatRoomScreen() {
       {/* Quoted Message Preview Bar */}
       <ReplyPreviewBar replyMessage={replyMessage} onCancel={() => setReplyMessage(null)} />
 
-      {/* Input Field */}
+      {/* Input Field with Paperclip Attachment Button */}
       <View
         style={[
           styles.inputContainer,
@@ -770,9 +878,17 @@ export default function ChatRoomScreen() {
           },
         ]}
       >
+        <TouchableOpacity
+          style={styles.attachButton}
+          activeOpacity={0.7}
+          onPress={() => setIsAttachmentSheetVisible(true)}
+        >
+          <Paperclip size={22} color={Colors.light.textSecondary} />
+        </TouchableOpacity>
+
         <TextInput
           style={styles.input}
-          placeholder={editingMessage ? 'Edit your message...' : 'Type a message...'}
+          placeholder={editingMessage ? 'Edit your message...' : isSelfChat ? 'Take a note or paste a link...' : 'Type a message...'}
           placeholderTextColor={Colors.light.textSecondary}
           value={inputText}
           onChangeText={handleInputChange}
@@ -780,14 +896,21 @@ export default function ChatRoomScreen() {
         />
         <TouchableOpacity
           style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
-          onPress={handleSendMessage}
+          onPress={() => handleSendMessage()}
           disabled={!inputText.trim()}
         >
           <Send size={20} color="#FFFFFF" />
         </TouchableOpacity>
       </View>
 
-      {/* Message Action Modal (Reaction dock with '+', reply, edit, star, delete) */}
+      {/* Media Attachment Sheet (Camera, Gallery, Audio, Files) */}
+      <MediaAttachmentSheet
+        visible={isAttachmentSheetVisible}
+        onClose={() => setIsAttachmentSheetVisible(false)}
+        onSelectOption={handleSelectAttachment}
+      />
+
+      {/* Message Action Modal */}
       <MessageActionModal
         visible={isActionModalVisible}
         message={selectedActionMessage}
@@ -832,7 +955,7 @@ const styles = StyleSheet.create({
   },
   bubbleContainer: {
     marginBottom: 10,
-    maxWidth: '82%',
+    maxWidth: '84%',
   },
   bubbleLeft: {
     alignSelf: 'flex-start',
@@ -871,6 +994,92 @@ const styles = StyleSheet.create({
   deletedText: {
     fontStyle: 'italic',
     color: '#8696A0',
+  },
+  mediaContainer: {
+    borderRadius: 8,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  mediaPlaceholder: {
+    width: 200,
+    height: 120,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mediaTag: {
+    fontSize: 12,
+    color: Colors.light.primary,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  mediaCaption: {
+    fontSize: 13,
+    color: Colors.light.textPrimary,
+    marginTop: 6,
+  },
+  docContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.04)',
+    padding: 8,
+    borderRadius: 8,
+    marginBottom: 4,
+  },
+  docIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 6,
+    backgroundColor: '#3B82F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  docDetails: {
+    flex: 1,
+  },
+  docTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.light.textPrimary,
+  },
+  docSub: {
+    fontSize: 11,
+    color: Colors.light.textSecondary,
+  },
+  audioContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    minWidth: 160,
+  },
+  audioPlayBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F59E0B',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  audioWaveform: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    height: 24,
+  },
+  waveformBar: {
+    width: 3,
+    height: 10,
+    backgroundColor: Colors.light.primary,
+    borderRadius: 1.5,
+    marginHorizontal: 2,
+  },
+  audioDuration: {
+    fontSize: 11,
+    color: Colors.light.textSecondary,
+    marginLeft: 6,
   },
   bubbleFooter: {
     flexDirection: 'row',
@@ -984,16 +1193,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     paddingVertical: 8,
     borderTopWidth: 0.5,
     borderTopColor: Colors.light.border,
+  },
+  attachButton: {
+    padding: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   input: {
     flex: 1,
     backgroundColor: '#F0F2F5',
     borderRadius: 20,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 8,
     fontSize: 15,
     maxHeight: 100,

@@ -122,17 +122,26 @@ class SocketService {
         if (data.messageId && data.userId) {
           await updateMessageReaction(data.messageId, data.userId, data.emoji, data.action || 'add');
         }
+        if (data.id) {
+          this.send({ event: 'ack', messageId: data.id, conversationId: data.conversationId, senderId: data.userId });
+        }
         break;
 
       case 'message_edited':
         if (data.messageId && data.content) {
           await editLocalMessage(data.messageId, data.content, data.editedAt || new Date().toISOString());
         }
+        if (data.id) {
+          this.send({ event: 'ack', messageId: data.id, conversationId: data.conversationId });
+        }
         break;
 
       case 'message_deleted':
         if (data.messageId) {
           await deleteLocalMessage(data.messageId, data.deleteType === 'for_everyone');
+        }
+        if (data.id) {
+          this.send({ event: 'ack', messageId: data.id, conversationId: data.conversationId });
         }
         break;
     }

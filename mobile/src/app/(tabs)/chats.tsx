@@ -9,9 +9,20 @@ import {
   Modal,
   Alert,
   RefreshControl,
+  Pressable,
 } from 'react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
-import { Search, Plus, MessageSquare } from 'lucide-react-native';
+import { useRouter, useFocusEffect, useNavigation } from 'expo-router';
+import {
+  Search,
+  Plus,
+  MessageSquare,
+  MoreVertical,
+  Settings as SettingsIcon,
+  Bookmark,
+  Star,
+  UserPlus,
+  X,
+} from 'lucide-react-native';
 import { getLocalDatabase } from '../../db/client';
 import { apiRequest } from '../../services/api';
 import { useAuthStore } from '../../store/auth';
@@ -21,16 +32,52 @@ import { getDirectConversationId } from '../../utils/conversation';
 
 export default function ChatsScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const token = useAuthStore((state) => state.token);
   const currentUser = useAuthStore((state) => state.user);
 
   const [conversations, setConversations] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchActive, setIsSearchActive] = useState(false);
+  const [isMenuVisible, setIsMenuVisible] = useState(false);
   const [isNewChatModalVisible, setIsNewChatModalVisible] = useState(false);
   const [searchUserInput, setSearchUserInput] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Setup custom top-right header buttons in tab screen
+  useEffect(() => {
+    navigation.setOptions({
+      headerTitle: isSearchActive ? '' : 'Qwink',
+      headerRight: () => (
+        <View style={styles.headerRightContainer}>
+          <TouchableOpacity
+            style={styles.headerIconBtn}
+            onPress={() => {
+              setIsSearchActive((prev) => !prev);
+              if (isSearchActive) setSearchQuery('');
+            }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            {isSearchActive ? (
+              <X color="#FFFFFF" size={22} />
+            ) : (
+              <Search color="#FFFFFF" size={22} />
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.headerIconBtn}
+            onPress={() => setIsMenuVisible(true)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <MoreVertical color="#FFFFFF" size={22} />
+          </TouchableOpacity>
+        </View>
+      ),
+    });
+  }, [navigation, isSearchActive]);
 
   useFocusEffect(
     useCallback(() => {
@@ -90,18 +137,22 @@ export default function ChatsScreen() {
 
           for (const thread of messageThreads) {
             if (!existingIds.has(thread.conversation_id)) {
-              // Extract target user ID from conversationId conv_userA_userB
-              const otherId = currentUser
-                ? thread.conversation_id.replace('conv_', '').split('_').find((p: string) => p !== currentUser.id)
-                : 'Contact';
+              if (currentUser && (thread.conversation_id === `conv_self_${currentUser.id}` || thread.conversation_id.includes(currentUser.id))) {
+                const isSelf = thread.conversation_id === `conv_self_${currentUser.id}`;
+                const otherId = isSelf
+                  ? currentUser.id
+                  : thread.conversation_id.replace('conv_', '').split('_').find((p: string) => p !== currentUser.id);
 
-              await db.runAsync(
-                `INSERT OR IGNORE INTO local_conversations (
-                  id, type, other_user_id, other_display_name, last_message_preview, last_message_at, unread_count, updated_at
-                ) VALUES (?, 'direct', ?, ?, ?, ?, 0, datetime('now'))`,
-                [thread.conversation_id, otherId, otherId || 'Chat', thread.latest_content, thread.max_at]
-              );
-              healed = true;
+                const otherName = isSelf ? 'Saved Messages (You)' : otherId || 'Chat';
+
+                await db.runAsync(
+                  `INSERT OR IGNORE INTO local_conversations (
+                    id, type, other_user_id, other_display_name, last_message_preview, last_message_at, unread_count, updated_at
+                  ) VALUES (?, 'direct', ?, ?, ?, ?, 0, datetime('now'))`,
+                  [thread.conversation_id, otherId, otherName, thread.latest_content, thread.max_at]
+                );
+                healed = true;
+              }
             }
           }
 
@@ -112,6 +163,31 @@ export default function ChatsScreen() {
           }
         }
       } catch (selfHealErr) {}
+
+      try {
+        if (currentUser) {
+          const corruptedRows: any[] = await db.getAllAsync(
+            `SELECT id FROM local_conversations WHERE other_user_id = ? AND id != ?`,
+            [currentUser.id, `conv_self_${currentUser.id}`]
+          );
+          let needsReload = false;
+          for (const row of corruptedRows) {
+            const correctOtherId = row.id.replace('conv_', '').split('_').find((p: string) => p !== currentUser.id);
+            if (correctOtherId) {
+              await db.runAsync(
+                `UPDATE local_conversations SET other_user_id = ? WHERE id = ?`,
+                [correctOtherId, row.id]
+              );
+              needsReload = true;
+            }
+          }
+          if (needsReload) {
+            rows = await db.getAllAsync(
+              'SELECT * FROM local_conversations ORDER BY COALESCE(last_message_at, updated_at, "") DESC'
+            );
+          }
+        }
+      } catch (e) {}
 
       setConversations(rows);
     } catch (err) {
@@ -124,6 +200,31 @@ export default function ChatsScreen() {
   const onRefresh = () => {
     setRefreshing(true);
     loadLocalConversations();
+  };
+
+  const handleOpenSelfChat = async () => {
+    if (!currentUser) return;
+    setIsMenuVisible(false);
+    const selfConvId = `conv_self_${currentUser.id}`;
+
+    const db = await getLocalDatabase();
+    await db.runAsync(
+      `INSERT OR IGNORE INTO local_conversations (
+        id, type, other_user_id, other_display_name, unread_count, updated_at
+      ) VALUES (?, 'direct', ?, ?, 0, datetime('now'))`,
+      [selfConvId, currentUser.id, 'Saved Messages (You)']
+    );
+
+    await loadLocalConversations();
+
+    router.push({
+      pathname: '/chat/[id]',
+      params: {
+        id: selfConvId,
+        otherUserId: currentUser.id,
+        otherDisplayName: 'Saved Messages (You)',
+      },
+    });
   };
 
   const handleSearchUser = async () => {
@@ -143,12 +244,15 @@ export default function ChatsScreen() {
     if (!currentUser) return;
     setIsNewChatModalVisible(false);
 
-    // Compute deterministic 1-on-1 direct conversation ID shared by both users
+    // If starting chat with self
+    if (targetUser.id === currentUser.id) {
+      handleOpenSelfChat();
+      return;
+    }
+
     const convId = getDirectConversationId(currentUser.id, targetUser.id);
-    
     const db = await getLocalDatabase();
     
-    // Check if conversation exists already to avoid wiping existing metadata
     const existing: any = await db.getFirstAsync(
       `SELECT * FROM local_conversations WHERE id = ?`,
       [convId]
@@ -195,23 +299,37 @@ export default function ChatsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.searchBarContainer}>
-        <Search color={Colors.light.textSecondary} size={18} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search chats or messages..."
-          placeholderTextColor={Colors.light.textSecondary}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-      </View>
+      {/* Expandable Search Bar */}
+      {isSearchActive && (
+        <View style={styles.searchBarContainer}>
+          <Search color={Colors.light.textSecondary} size={18} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search chats, contacts, notes..."
+            placeholderTextColor={Colors.light.textSecondary}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoFocus
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <X size={16} color={Colors.light.textSecondary} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
 
+      {/* Conversations List */}
       {filteredConversations.length === 0 ? (
         <View style={styles.emptyContainer}>
           <MessageSquare size={64} color="#CBD5E1" />
-          <Text style={styles.emptyTitle}>No messages yet</Text>
+          <Text style={styles.emptyTitle}>
+            {searchQuery ? 'No matching chats found' : 'No messages yet'}
+          </Text>
           <Text style={styles.emptySubtitle}>
-            Tap the + button below to find a contact by @username or virtual number and start chatting!
+            {searchQuery
+              ? 'Try searching with a different name or keyword.'
+              : 'Tap the + button below or open the menu to start chatting with contacts or write notes to yourself!'}
           </Text>
         </View>
       ) : (
@@ -226,62 +344,92 @@ export default function ChatsScreen() {
               tintColor={Colors.light.primary}
             />
           }
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.chatRow}
-              activeOpacity={0.7}
-              onPress={() =>
-                router.push({
-                  pathname: '/chat/[id]',
-                  params: {
-                    id: item.id,
-                    otherUserId: item.other_user_id,
-                    otherDisplayName: item.other_display_name,
-                  },
-                })
-              }
-            >
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>
-                  {(item.other_display_name || 'U')[0].toUpperCase()}
-                </Text>
-              </View>
+          renderItem={({ item }) => {
+            const isSelf =
+              item.id.startsWith('conv_self_') ||
+              (currentUser && item.other_user_id === currentUser.id);
 
-              <View style={styles.chatDetails}>
-                <View style={styles.chatHeader}>
-                  <Text style={styles.chatName}>{item.other_display_name}</Text>
-                  {item.last_message_at && (
-                    <Text style={[styles.chatTime, item.unread_count > 0 && styles.chatTimeActive]}>
-                      {new Date(item.last_message_at).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
+            return (
+              <TouchableOpacity
+                style={styles.chatRow}
+                activeOpacity={0.7}
+                onPress={() =>
+                  router.push({
+                    pathname: '/chat/[id]',
+                    params: {
+                      id: item.id,
+                      otherUserId: item.other_user_id,
+                      otherDisplayName: isSelf
+                        ? 'Saved Messages (You)'
+                        : item.other_display_name,
+                    },
+                  })
+                }
+              >
+                <View
+                  style={[
+                    styles.avatar,
+                    isSelf && { backgroundColor: '#0284C7' },
+                  ]}
+                >
+                  {isSelf ? (
+                    <Bookmark size={22} color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.avatarText}>
+                      {(item.other_display_name || 'U')[0].toUpperCase()}
                     </Text>
                   )}
                 </View>
 
-                <View style={styles.chatFooterRow}>
-                  <Text
-                    style={[styles.lastMessage, item.unread_count > 0 && styles.lastMessageUnread]}
-                    numberOfLines={1}
-                  >
-                    {item.last_message_preview || 'Tap to start conversation'}
-                  </Text>
-
-                  {item.unread_count > 0 && (
-                    <View style={styles.unreadBadge}>
-                      <Text style={styles.unreadBadgeText}>
-                        {item.unread_count > 99 ? '99+' : item.unread_count}
+                <View style={styles.chatDetails}>
+                  <View style={styles.chatHeader}>
+                    <Text style={styles.chatName}>
+                      {isSelf ? 'Saved Messages' : item.other_display_name}
+                      {isSelf && <Text style={styles.selfBadge}> (You)</Text>}
+                    </Text>
+                    {item.last_message_at && (
+                      <Text
+                        style={[
+                          styles.chatTime,
+                          item.unread_count > 0 && styles.chatTimeActive,
+                        ]}
+                      >
+                        {new Date(item.last_message_at).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
                       </Text>
-                    </View>
-                  )}
+                    )}
+                  </View>
+
+                  <View style={styles.chatFooterRow}>
+                    <Text
+                      style={[
+                        styles.lastMessage,
+                        item.unread_count > 0 && styles.lastMessageUnread,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.last_message_preview ||
+                        (isSelf ? 'Notes to self & personal cloud' : 'Tap to start conversation')}
+                    </Text>
+
+                    {item.unread_count > 0 && (
+                      <View style={styles.unreadBadge}>
+                        <Text style={styles.unreadBadgeText}>
+                          {item.unread_count > 99 ? '99+' : item.unread_count}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
-              </View>
-            </TouchableOpacity>
-          )}
+              </TouchableOpacity>
+            );
+          }}
         />
       )}
 
+      {/* Floating Action Button */}
       <TouchableOpacity
         style={styles.fab}
         activeOpacity={0.8}
@@ -290,6 +438,64 @@ export default function ChatsScreen() {
         <Plus color="#FFFFFF" size={26} />
       </TouchableOpacity>
 
+      {/* Top Right Hamburger / 3-Dot Dropdown Menu */}
+      <Modal visible={isMenuVisible} transparent animationType="fade">
+        <Pressable
+          style={styles.menuOverlay}
+          onPress={() => setIsMenuVisible(false)}
+        >
+          <View style={styles.menuCard}>
+            {/* New Chat */}
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setIsMenuVisible(false);
+                setIsNewChatModalVisible(true);
+              }}
+            >
+              <UserPlus size={18} color={Colors.light.primary} />
+              <Text style={styles.menuItemText}>New Chat</Text>
+            </TouchableOpacity>
+
+            {/* Saved Messages / Notes to Self */}
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={handleOpenSelfChat}
+            >
+              <Bookmark size={18} color="#0284C7" />
+              <Text style={styles.menuItemText}>Saved Messages (Notes)</Text>
+            </TouchableOpacity>
+
+            {/* Starred Messages */}
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setIsMenuVisible(false);
+                router.push('/starred-messages');
+              }}
+            >
+              <Star size={18} color="#D97706" />
+              <Text style={styles.menuItemText}>Starred Messages</Text>
+            </TouchableOpacity>
+
+            <View style={styles.menuDivider} />
+
+            {/* Settings */}
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setIsMenuVisible(false);
+                router.push('/settings');
+              }}
+            >
+              <SettingsIcon size={18} color={Colors.light.textPrimary} />
+              <Text style={styles.menuItemText}>Settings</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* New Chat / Find Contact Modal */}
       <Modal visible={isNewChatModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -305,16 +511,40 @@ export default function ChatsScreen() {
                 placeholderTextColor={Colors.light.textSecondary}
                 value={searchUserInput}
                 onChangeText={setSearchUserInput}
+                autoFocus
               />
-              <TouchableOpacity style={styles.modalSearchBtn} onPress={handleSearchUser}>
-                <Text style={styles.modalSearchBtnText}>Search</Text>
+              <TouchableOpacity
+                style={styles.modalSearchBtn}
+                onPress={handleSearchUser}
+                disabled={searching}
+              >
+                <Text style={styles.modalSearchBtnText}>
+                  {searching ? '...' : 'Search'}
+                </Text>
               </TouchableOpacity>
             </View>
+
+            {/* Quick Option: Message Yourself */}
+            <TouchableOpacity
+              style={styles.selfNoteRow}
+              onPress={() => {
+                setIsNewChatModalVisible(false);
+                handleOpenSelfChat();
+              }}
+            >
+              <View style={styles.selfNoteAvatar}>
+                <Bookmark size={18} color="#FFFFFF" />
+              </View>
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={styles.selfNoteTitle}>Message Yourself (Notes)</Text>
+                <Text style={styles.selfNoteSub}>Save messages, links & media</Text>
+              </View>
+            </TouchableOpacity>
 
             <FlatList
               data={searchResults}
               keyExtractor={(u) => u.id}
-              style={{ maxHeight: 200, marginTop: 12 }}
+              style={{ maxHeight: 200, marginTop: 8 }}
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={styles.searchUserItem}
@@ -346,20 +576,33 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
+  headerRightContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  headerIconBtn: {
+    padding: 8,
+    marginLeft: 4,
+  },
   searchBarContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F0F2F5',
-    margin: 12,
+    marginHorizontal: 12,
+    marginTop: 10,
+    marginBottom: 6,
     paddingHorizontal: 12,
     borderRadius: 10,
-    height: 40,
+    height: 42,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
   searchInput: {
     flex: 1,
     marginLeft: 8,
     fontSize: 14,
-    color: Colors.light.textPrimary,
+    color: '#111B21',
   },
   emptyContainer: {
     flex: 1,
@@ -415,6 +658,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.light.textPrimary,
   },
+  selfBadge: {
+    fontSize: 13,
+    color: '#0284C7',
+    fontWeight: 'normal',
+  },
   chatTime: {
     fontSize: 12,
     color: Colors.light.textSecondary,
@@ -468,6 +716,44 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 4,
   },
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-end',
+    paddingTop: 56,
+    paddingRight: 16,
+  },
+  menuCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingVertical: 6,
+    width: 210,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  menuItemText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.light.textPrimary,
+    marginLeft: 12,
+  },
+  menuDivider: {
+    height: 1,
+    backgroundColor: '#F1F5F9',
+    marginVertical: 4,
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -514,6 +800,33 @@ const styles = StyleSheet.create({
   modalSearchBtnText: {
     color: '#FFFFFF',
     fontWeight: 'bold',
+  },
+  selfNoteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0F9FF',
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+  },
+  selfNoteAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#0284C7',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  selfNoteTitle: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#0369A1',
+  },
+  selfNoteSub: {
+    fontSize: 11,
+    color: '#0284C7',
   },
   searchUserItem: {
     paddingVertical: 10,

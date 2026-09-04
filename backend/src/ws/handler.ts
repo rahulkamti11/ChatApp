@@ -201,8 +201,12 @@ export async function handleWebSocketUpgrade(
 
         case 'message_reaction': {
           if (data.recipientId) {
+            const eventId = 'evt_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+            const sequence = await getNextSequence(env.DB, data.conversationId);
             const payloadString = JSON.stringify({
               event: 'message_reaction',
+              id: eventId,
+              sequence,
               messageId: data.messageId,
               conversationId: data.conversationId,
               userId: user.userId,
@@ -214,11 +218,10 @@ export async function handleWebSocketUpgrade(
             if (recipientSocket && recipientSocket.readyState === WebSocket.OPEN) {
               recipientSocket.send(payloadString);
             } else {
-              const eventId = 'evt_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
               await env.DB.prepare(`
                 INSERT INTO pending_messages (id, conversation_id, sender_id, recipient_id, sequence, encrypted_payload)
-                VALUES (?, ?, ?, ?, 0, ?)
-              `).bind(eventId, data.conversationId, user.userId, data.recipientId, payloadString).run();
+                VALUES (?, ?, ?, ?, ?, ?)
+              `).bind(eventId, data.conversationId, user.userId, data.recipientId, sequence, payloadString).run();
             }
           }
           break;
@@ -226,8 +229,12 @@ export async function handleWebSocketUpgrade(
 
         case 'edit_message': {
           if (data.recipientId) {
+            const eventId = 'evt_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+            const sequence = await getNextSequence(env.DB, data.conversationId);
             const payloadString = JSON.stringify({
               event: 'message_edited',
+              id: eventId,
+              sequence,
               messageId: data.messageId,
               conversationId: data.conversationId,
               content: data.content,
@@ -238,11 +245,10 @@ export async function handleWebSocketUpgrade(
             if (recipientSocket && recipientSocket.readyState === WebSocket.OPEN) {
               recipientSocket.send(payloadString);
             } else {
-              const eventId = 'evt_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
               await env.DB.prepare(`
                 INSERT INTO pending_messages (id, conversation_id, sender_id, recipient_id, sequence, encrypted_payload)
-                VALUES (?, ?, ?, ?, 0, ?)
-              `).bind(eventId, data.conversationId, user.userId, data.recipientId, payloadString).run();
+                VALUES (?, ?, ?, ?, ?, ?)
+              `).bind(eventId, data.conversationId, user.userId, data.recipientId, sequence, payloadString).run();
             }
           }
           break;
@@ -250,8 +256,12 @@ export async function handleWebSocketUpgrade(
 
         case 'delete_message': {
           if (data.recipientId) {
+            const eventId = 'evt_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+            const sequence = await getNextSequence(env.DB, data.conversationId);
             const payloadString = JSON.stringify({
               event: 'message_deleted',
+              id: eventId,
+              sequence,
               messageId: data.messageId,
               conversationId: data.conversationId,
               deleteType: data.deleteType || 'for_everyone',
@@ -261,11 +271,10 @@ export async function handleWebSocketUpgrade(
             if (recipientSocket && recipientSocket.readyState === WebSocket.OPEN) {
               recipientSocket.send(payloadString);
             } else {
-              const eventId = 'evt_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
               await env.DB.prepare(`
                 INSERT INTO pending_messages (id, conversation_id, sender_id, recipient_id, sequence, encrypted_payload)
-                VALUES (?, ?, ?, ?, 0, ?)
-              `).bind(eventId, data.conversationId, user.userId, data.recipientId, payloadString).run();
+                VALUES (?, ?, ?, ?, ?, ?)
+              `).bind(eventId, data.conversationId, user.userId, data.recipientId, sequence, payloadString).run();
             }
           }
           break;
